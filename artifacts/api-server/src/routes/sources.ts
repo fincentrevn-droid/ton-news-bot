@@ -21,11 +21,23 @@ router.post("/sources", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  // Normalise Telegram channel URLs: "https://t.me/foo", "t.me/foo" → "@foo"
+  let url = parsed.data.url.trim();
+  if (parsed.data.type === "telegram_channel") {
+    const clean = url
+      .replace(/^https?:\/\//i, "")
+      .replace(/^t\.me\//i, "")
+      .replace(/^@/, "")
+      .split("/")[0]
+      .trim();
+    url = `@${clean}`;
+  }
+
   const [source] = await db
     .insert(sourcesTable)
     .values({
       name: parsed.data.name,
-      url: parsed.data.url,
+      url,
       type: parsed.data.type,
       isPrimary: parsed.data.isPrimary ?? false,
       category: parsed.data.category ?? null,

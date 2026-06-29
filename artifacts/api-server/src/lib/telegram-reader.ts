@@ -89,7 +89,13 @@ export async function fetchTelegramChannelPosts(
 
   const results = await Promise.allSettled(
     channels.map(async (ch) => {
-      const username = ch.url.replace(/^@/, "");
+      // Normalise: "@username", "https://t.me/username", "t.me/username" → "username"
+      const username = ch.url
+        .replace(/^https?:\/\//i, "")
+        .replace(/^t\.me\//i, "")
+        .replace(/^@/, "")
+        .split("/")[0]
+        .trim();
       const messages = await client.getMessages(username, { limit: 20 });
 
       const posts: SourcePost[] = [];

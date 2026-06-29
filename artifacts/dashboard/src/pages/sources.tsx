@@ -302,7 +302,7 @@ function SourceForm({
         <FormField control={form.control} name="url" render={({ field }) => (
           <FormItem>
             <FormLabel>URL or Handle</FormLabel>
-            <FormControl><Input placeholder="https://... or @channel" {...field} /></FormControl>
+            <FormControl><Input placeholder="@channel или https://t.me/channel" {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />
