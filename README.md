@@ -180,18 +180,31 @@ See `.env.example` for the full list with comments.
 The build/start commands above already live in the root `railway.json`, so a correctly
 configured service picks them up automatically — you should not need to type them by hand.
 
-> **If Railway already split the repo into multiple services:** delete the extra ones
-> (`dashboard`, `api-server`, `db`, `api-zod`, `api-client`, `api-spec`) and keep a single
-> service whose **Root Directory** is `/`. Railway can auto-detect monorepo packages and
-> over-create services — that behavior is wrong for this project.
+> **Why this keeps happening:** Railway's **"Deploy from GitHub repo"** wizard scans
+> `pnpm-workspace.yaml` and auto-creates one service per workspace package. Railway has
+> **no config-file flag** to disable this — the root `railway.json` already correctly defines
+> the single service, but you must avoid the auto-detect wizard and/or delete the extras
+> manually. The steps below use the **Empty Project** flow, which does **not** trigger the
+> multi-service scan.
 
-### 1. Create the single Railway service
+### 1. Create the single Railway service (the reliable way)
 
-1. Go to [railway.app](https://railway.app) → **New Project**
-2. Choose **Deploy from GitHub repo** and connect this repository
-3. In the service **Settings → Source**, confirm **Root Directory** is empty (`/`)
-4. Railway detects the root `railway.json` and configures the build automatically
-5. If Railway offers to create services for detected packages, **decline** — keep only one service
+**Do NOT use "Deploy from GitHub repo"** — that is the flow that creates 6 services. Instead:
+
+1. Go to [railway.app](https://railway.app) → **New Project** → **Empty Project**
+2. Inside the project: **+ Create** → **GitHub Repo** → select `fincentrevn-droid/ton-news-bot`
+   - This adds **one** service without the monorepo scan.
+3. Open the service → **Settings → Source** and confirm **Root Directory** is empty (`/`)
+4. Railway reads the root `railway.json` and uses its build/start commands automatically
+5. Trigger a deploy
+
+### Already have 6 services? Clean them up
+
+1. Delete every auto-created service: `dashboard`, `api-server`, `db`, `api-zod`, `api-client`, `api-spec`
+   (service → **Settings → Danger → Remove Service**).
+2. Keep (or create, per step 1 above) **one** service with **Root Directory** `/`.
+3. Re-add the PostgreSQL plugin and all environment variables to that single service.
+4. Redeploy.
 
 ### 2. Add a PostgreSQL database
 
