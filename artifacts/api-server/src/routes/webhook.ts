@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { eq, sql, and, gte } from "drizzle-orm";
 import { db, postsTable, sourcesTable, schedulesTable } from "@workspace/db";
-import { generatePostContent, incrementAiUsage, getOrCreateTodayUsage, getSettings } from "../lib/openai";
+import { generatePostContent, incrementAiUsage, getOrCreateTodayUsage, getSettings, runQualityCheck, rewriteWithFeedback, type QualityCheckResult } from "../lib/openai";
 import { sendTelegramMessage, sendPhotoPost, sendReviewMessage, answerCallbackQuery, notifyOwner } from "../lib/telegram";
 import { fetchSourcePosts } from "../lib/sources";
 import { checkSafety, cleanContent } from "../lib/safety";
@@ -354,6 +354,64 @@ async function generateFromSources(
   const hasMedia = candidate.mediaType === "photo" && Boolean(candidate.mediaBuffer);
   const sourceType = candidate.channelUrl.startsWith("@") ? "telegram_channel" : "rss";
 
+  // ── AI quality check ──────────────────────────────────────────────────────
+  const qualityCheckEnabled = process.env.ENABLE_AI_QUALITY_CHECK !== "false";
+  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "80", 10);
+  const maxQualityRewrites = parseInt(process.env.MAX_AUTO_QUALITY_REWRITES ?? "1", 10);
+
+  let finalContent = cleanedContent;
+  let qualityResult: QualityCheckResult | null = null;
+  let rewriteAttempts = 0;
+
+  if (qualityCheckEnabled) {
+    try {
+      qualityResult = await runQualityCheck(cleanedContent, candidate.fullText);
+      logger.info(
+        { score: qualityResult.quality_score, passed: qualityResult.passed, needs_rewrite: qualityResult.needs_rewrite },
+        "Quality check result"
+      );
+
+      // Rewrite once if score is borderline (60-79) and a rewrite is recommended
+      if (
+        !qualityResult.passed &&
+        qualityResult.needs_rewrite &&
+        qualityResult.quality_score >= 60 &&
+        rewriteAttempts < maxQualityRewrites
+      ) {
+        try {
+          const rewritten = await rewriteWithFeedback({
+            content: cleanedContent,
+            issues: qualityResult.issues,
+            instruction: qualityResult.rewrite_instruction,
+            sourceText: candidate.fullText,
+            sourceChannel: candidate.channel,
+            originalFormat: postType,
+          });
+          rewriteAttempts++;
+
+          // Re-check quality after rewrite
+          const recheck = await runQualityCheck(rewritten, candidate.fullText);
+          logger.info(
+            { score: recheck.quality_score, passed: recheck.passed, rewriteAttempts },
+            "Quality re-check after rewrite"
+          );
+
+          // Accept rewritten version if it improved or is now acceptable
+          if (recheck.quality_score >= qualityResult.quality_score) {
+            finalContent = rewritten;
+            qualityResult = recheck;
+          } else {
+            qualityResult = recheck;
+          }
+        } catch (rewriteErr) {
+          logger.warn({ rewriteErr }, "Quality rewrite failed — keeping original content");
+        }
+      }
+    } catch (qcErr) {
+      logger.warn({ qcErr }, "Quality check failed — proceeding without quality gate");
+    }
+  }
+
   // ── Decide: auto-publish queue or manual review ───────────────────────────
   const schedRows = await db.select().from(schedulesTable).limit(1);
   const schedule = schedRows[0];
@@ -361,15 +419,19 @@ async function generateFromSources(
   const autoPublishEnabled = schedule?.autoPublish ?? false;
   const inWindow = schedule ? isInActiveWindow(schedule) : false;
 
-  const qualifies = qualifiesForAutoPublish({ confidence, safety, content: cleanedContent });
-  const routeToQueue = autoPublishEnabled && qualifies;
+  const qualifies = qualifiesForAutoPublish({ confidence, safety, content: finalContent });
+  const qualityOk =
+    !qualityCheckEnabled ||
+    !qualityResult ||
+    (qualityResult.quality_score >= minQualityScore && qualityResult.safe_for_autopublish);
+  const routeToQueue = autoPublishEnabled && qualifies && qualityOk;
 
-  // Insert post
+  // Insert post with quality data
   const [post] = await db.insert(postsTable).values({
-    content: cleanedContent,
+    content: finalContent,
     postType,
     safetyStatus: safety.status,
-    aiCallsUsed: 1,
+    aiCallsUsed: 1 + rewriteAttempts,
     sourceType,
     sourceUrl: candidate.link || null,
     sourceChannel: candidate.channel,
@@ -383,36 +445,49 @@ async function generateFromSources(
     hasMedia,
     mediaType: candidate.mediaType ?? null,
     mediaDownloadStatus: hasMedia ? "ok" : null,
+    qualityScore: qualityResult?.quality_score ?? null,
+    qualityCheckPassed: qualityResult?.passed ?? null,
+    qualityIssues: qualityResult?.issues?.length ? JSON.stringify(qualityResult.issues) : null,
+    safeForAutopublish: qualityResult?.safe_for_autopublish ?? null,
+    rewriteAttempts,
   }).returning();
 
   if (routeToQueue) {
-    // Leave as draft (no review message) — scheduler ticker will publish it with proper spacing
     const windowNote = inWindow ? "" : " (сейчас ночная пауза — опубликуется позже)";
     const photoNote = hasMedia ? " с фото 📷" : "";
+    const scoreNote = qualityResult ? ` · QC ${qualityResult.quality_score}/100` : "";
     logger.info(
-      { postId: post.id, inWindow, confidence, safety: safety.status },
+      { postId: post.id, inWindow, confidence, safety: safety.status, qualityScore: qualityResult?.quality_score },
       "Post queued for auto-publish"
     );
     await sendReply(
-      `⏳ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote} добавлен в очередь авто-публикации${windowNote}.`
+      `⏳ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote} добавлен в очередь авто-публикации${windowNote}.${scoreNote}`
     );
     return;
   }
 
   // Manual review flow: send review message with ✅ / 🔁 / ❌ buttons
+  const qualityWarning =
+    qualityResult && !qualityResult.passed && qualityResult.quality_score < minQualityScore
+      ? "\n\n⚠️ Пост не прошёл проверку качества."
+      : "";
+
   const reviewMeta = {
     sourceChannel: candidate.channel,
     sourcePreview: candidate.preview,
     sourceLink: candidate.link || undefined,
     confidence,
+    qualityScore: qualityResult?.quality_score,
+    qualityIssues: qualityResult?.issues?.length ? qualityResult.issues : undefined,
+    safeForAutopublish: qualityResult?.safe_for_autopublish,
   };
 
   const { messageId: reviewMsgId, fileId } = await sendReviewMessage(
     post.id,
-    cleanedContent,
+    finalContent,
     safety.warnings,
     postType,
-    undefined,
+    qualityWarning || undefined,
     reviewMeta,
     hasMedia ? candidate.mediaBuffer : undefined,
   );
@@ -425,7 +500,8 @@ async function generateFromSources(
   }
 
   const photoNote = hasMedia ? " с фото 📷" : "";
-  await sendReply(`✅ Пост #${post.id} из источника "<b>${candidate.channel}</b>"${photoNote} отправлен на ревью.`);
+  const qcNote = qualityResult ? ` (QC: ${qualityResult.quality_score}/100)` : "";
+  await sendReply(`✅ Пост #${post.id} из источника "<b>${candidate.channel}</b>"${photoNote}${qcNote} отправлен на ревью.`);
 }
 
 export default router;
