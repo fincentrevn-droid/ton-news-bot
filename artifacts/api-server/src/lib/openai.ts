@@ -66,53 +66,41 @@ export async function incrementAiUsage(type: "call" | "post" | "rewrite") {
 
 const SOURCE_SYSTEM_PROMPT = `Ты автор Telegram-канала TONKOFF о TON, Telegram-крипте и крипторынке.
 
-Тебе дан текст источника. Это сырой материал. Используй только факты из него.
+Тебе дан текст источника. Используй только факты из него.
 
-ГЛАВНОЕ ПРАВИЛО: пиши как автор канала, а не как пересказчик.
+ГЛАВНОЕ ПРАВИЛО: пиши как автор канала, не как пересказчик новостей.
 Читатель должен чувствовать, что TONKOFF сам рассказывает историю.
 
-КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО в тексте поста:
-- "в источнике пишут" / "источник сообщает" / "там сказано"
-- "по данным источника" / "рядом упоминается" / "согласно посту"
-- "source" / "confidence" / "ссылка" / "Черновик"
-- метки формата: [SHORT] [MEDIUM] [MICRO] [LONG]
-- любые слова, которые раскрывают что ты пересказываешь чужой текст
+КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО в тексте:
+- "в источнике пишут" / "источник сообщает" / "там сказано" / "по данным источника"
+- "source" / "confidence" / "Черновик" / "[SHORT]" / "[MEDIUM]" / "[MICRO]" / "[LONG]"
+- любые слова, раскрывающие что ты пересказываешь чужой текст
+- символ "—" (длинное тире). Вместо него: запятая, двоеточие, точка, скобки или "-".
 
-ЗАПРЕЩЁННЫЙ СИМВОЛ: не используй тире "—" нигде. Никогда.
-Вместо него: запятая, двоеточие, точка, скобки или обычный дефис (-).
+Если источник слабый/нерелевантен: верни "NO_POST" в поле headline.
+Если информация неофициальная: добавь "пока без официального подтверждения" в один из абзацев.
 
-Если источник слабый или нерелевантен: верни NO_POST в поле public_post_text.
-Если информация неофициальная: добавь "пока без официального подтверждения".
-
-Приоритет тем:
-1. TON / The Open Network
-2. Telegram: Gifts, Stars, Fragment, Wallet, mini apps
-3. Дуров / Telegram
-4. BTC, ETH, важные крипто-новости
-
-ФОРМАТЫ (выбери сам по силе темы):
-
-micro (до 250 симв): хук + одно наблюдение + короткий вывод (1-3 строки).
-short (250-550 симв): хук / пустая строка / факт+контекст / пустая строка / вывод.
-medium (550-950 симв): хук / пустая строка / что случилось / пустая строка / почему важно / пустая строка / вывод.
-long (950-1400 симв, только для сильных тем): хук / факт / контекст / последствия / итог.
-
-По умолчанию: short или medium. Long только если тема очень сильная.
+Приоритет тем: TON, Telegram (Gifts/Stars/Fragment/Wallet/mini apps), Дуров, BTC/ETH/крипторынок.
 
 СТИЛЬ:
-- Живой, умный, чуть ироничный
-- Человеческий голос, не AI-шаблон
-- Первая строка: зацепка или чёткий факт
-- Короткие абзацы, пустые строки между ними
-- Короткие предложения. Если одно предложение несёт слишком много идей, раздели его.
-- Эмодзи: 0-1 в micro/short, 0-2 в medium, 0-3 в long (только когда уместно)
-- Без хэштегов
+- Живой, умный, чуть ироничный. Человеческий голос, не AI-шаблон.
+- Первая строка: зацепка или чёткий факт.
+- Короткие предложения. Каждое несёт одну идею.
+- Эмодзи: 0-1 в micro/short, 0-2 в medium, 0-3 в long. Только когда уместно.
+- Без хэштегов.
+ЗАПРЕЩЕНО: покупай, продавай, иксы, летим, all in, гарантированный рост, финансовые советы.
 
-ЗАПРЕЩЕНО: "—", покупай, продавай, иксы, летим, all in, гарантированный рост, финансовые советы.
+ФОРМАТ (выбери по силе темы): micro/short/medium/long.
+По умолчанию: short или medium. Long только для важных тем с богатыми деталями.
 
-ФОРМАТ ОТВЕТА: верни JSON и ТОЛЬКО JSON без преамбул:
+ФОРМАТ ОТВЕТА: верни ТОЛЬКО JSON без преамбул.
+Для micro: headline + takeaway (paragraphs может быть пустым).
+Для short/medium/long: headline + 1-3 коротких абзаца + takeaway.
+
 {
-  "public_post_text": "готовый текст поста",
+  "headline": "одна сильная первая строка",
+  "paragraphs": ["абзац с главным фактом", "абзац с контекстом или выводом"],
+  "takeaway": "короткая финальная мысль (или пустая строка для micro)",
   "post_format": "micro|short|medium|long",
   "confidence": "high|medium|low",
   "source_used": true
@@ -122,20 +110,17 @@ const FREE_SYSTEM_PROMPT = `Ты автор Telegram-канала TONKOFF о TON
 
 Темы: TON, Telegram (Gifts, Stars, Fragment, Wallet, mini apps), Дуров, BTC, ETH, крипторынок.
 
-ЗАПРЕЩЁННЫЙ СИМВОЛ: не используй тире "—" нигде. Никогда.
-ЗАПРЕЩЕНО в тексте: источник, "в источнике", "[SHORT]", "Черновик" и любые метаданные.
+ЗАПРЕЩЕНО в тексте: "—", источник, "[SHORT]", "Черновик", метаданные.
+ЗАПРЕЩЕНО: покупай, продавай, иксы, летим, all in, гарантированный рост.
 
-Форматы: micro (до 250 симв), short (250-550), medium (550-950), long (950-1400, только сильные темы).
+Пиши живо, умно, с человеческим голосом. Короткие предложения. Эмодзи: 0-2. Без хэштегов.
 По умолчанию: short или medium.
 
-Структура: хук / пустая строка / абзацы / пустая строка / вывод.
-Стиль: живой, умный, чуть ироничный, человеческий голос, короткие предложения.
-Эмодзи: 0-2 уместных. Без хэштегов.
-Запрещено: покупай, продавай, иксы, летим, all in, гарантированный рост.
-
-ФОРМАТ ОТВЕТА: верни JSON и ТОЛЬКО JSON:
+ФОРМАТ ОТВЕТА: верни ТОЛЬКО JSON:
 {
-  "public_post_text": "готовый текст поста",
+  "headline": "одна сильная первая строка",
+  "paragraphs": ["абзац 1", "абзац 2"],
+  "takeaway": "короткий вывод",
   "post_format": "micro|short|medium|long",
   "confidence": "high|medium|low",
   "source_used": false
@@ -217,7 +202,8 @@ export function sanitizePost(text: string): string {
   // 5. Fix punctuation artefacts left by dash replace
   s = s.replace(/:\s*,\s*/g, ": ");
   s = s.replace(/,\s*,/g, ",");
-  s = s.replace(/\s{2,}/g, " ");
+  // Collapse multiple SPACES only (NOT newlines — those are paragraph breaks)
+  s = s.replace(/ {2,}/g, " ");
 
   // 6. Trim trailing spaces on each line
   s = s.split("\n").map(l => l.trimEnd()).join("\n");
@@ -238,37 +224,91 @@ export function sanitizePost(text: string): string {
   return s.trim();
 }
 
-// ─── JSON response parser ─────────────────────────────────────────────────────
+// ─── JSON response parser + assembler ────────────────────────────────────────
 
 interface AiJsonResponse {
-  public_post_text: string;
+  headline?: string;
+  paragraphs?: string[];
+  takeaway?: string;
+  // Backward-compat flat field (AI sometimes still returns this)
+  public_post_text?: string;
   post_format?: string;
   confidence?: string;
   source_used?: boolean;
 }
 
 /**
- * Try to parse AI response as JSON. Falls back gracefully if AI returned plain text.
+ * Try to parse AI JSON response. Extracts JSON block even if AI adds preamble.
+ * Falls back to null so caller can treat raw text as a plain-text response.
  */
 function parseAiResponse(raw: string): AiJsonResponse | null {
-  // Try direct parse
-  try {
-    const parsed = JSON.parse(raw) as AiJsonResponse;
-    if (typeof parsed?.public_post_text === "string") return parsed;
-  } catch {
-    // ignore
-  }
-  // Try to extract JSON block from response (AI sometimes adds preamble)
-  const jsonMatch = raw.match(/\{[\s\S]*"public_post_text"[\s\S]*\}/);
-  if (jsonMatch) {
+  const tryParse = (s: string): AiJsonResponse | null => {
     try {
-      const parsed = JSON.parse(jsonMatch[0]) as AiJsonResponse;
-      if (typeof parsed?.public_post_text === "string") return parsed;
-    } catch {
-      // ignore
-    }
-  }
+      const obj = JSON.parse(s) as AiJsonResponse;
+      if (obj && typeof obj === "object" && (obj.headline !== undefined || obj.public_post_text !== undefined)) {
+        return obj;
+      }
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  const direct = tryParse(raw);
+  if (direct) return direct;
+
+  // Try to extract JSON block (handles preamble/postamble from AI)
+  const match = raw.match(/\{[\s\S]*?"(?:headline|public_post_text)"[\s\S]*?\}/);
+  if (match) return tryParse(match[0]);
+
   return null;
+}
+
+/**
+ * Assemble the public post text from structured AI JSON.
+ * Guarantees paragraph breaks between sections.
+ */
+function assemblePost(parsed: AiJsonResponse): string {
+  // Structured format: headline + paragraphs[] + takeaway
+  if (parsed.headline !== undefined || parsed.paragraphs !== undefined) {
+    const parts: string[] = [];
+    if (parsed.headline?.trim()) parts.push(parsed.headline.trim());
+    if (Array.isArray(parsed.paragraphs)) {
+      for (const p of parsed.paragraphs) {
+        const t = p?.trim();
+        if (t) parts.push(t);
+      }
+    }
+    if (parsed.takeaway?.trim()) parts.push(parsed.takeaway.trim());
+    if (parts.length > 0) return parts.join("\n\n");
+  }
+  // Flat fallback
+  return parsed.public_post_text?.trim() ?? "";
+}
+
+/**
+ * Validate that a non-micro post has paragraph breaks.
+ * If it's a wall of text, split it into paragraphs at sentence boundaries.
+ */
+function validateAndReformat(text: string, format: PostFormat): string {
+  if (format === "micro") return text;
+  const breakCount = (text.match(/\n\n/g) ?? []).length;
+  if (breakCount >= 1) return text; // Already has structure
+
+  // Wall-of-text: split into paragraphs at sentence boundaries
+  // Split after ". ", "! ", "? " — keep the separator
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  if (sentences.length <= 1) return text; // Can't split — leave as-is
+
+  // Group into 2-3 meaningful blocks
+  const total = sentences.length;
+  const blockSize = Math.max(1, Math.ceil(total / 3));
+  const blocks: string[] = [];
+  for (let i = 0; i < total; i += blockSize) {
+    const block = sentences.slice(i, i + blockSize).join(" ").trim();
+    if (block) blocks.push(block);
+  }
+  const result = blocks.join("\n\n");
+  logger.warn({ original: text.length, blocks: blocks.length }, "Wall-of-text post reformatted");
+  return result;
 }
 
 // ─── Main generation ─────────────────────────────────────────────────────────
@@ -344,13 +384,15 @@ export async function generatePostContent(options: {
   const raw = response.choices[0]?.message?.content?.trim() ?? "";
   if (!raw) throw new Error("AI returned empty content");
 
-  // Try to parse JSON response; fall back to treating raw text as post content
+  // Parse JSON response from AI
   const parsed = parseAiResponse(raw);
-  const publicText = parsed?.public_post_text ?? raw;
 
-  if (publicText.trim() === "NO_POST") {
-    throw new Error("NO_POST");
-  }
+  // Check for NO_POST signal
+  const noPostSignal =
+    parsed?.headline?.trim() === "NO_POST" ||
+    parsed?.public_post_text?.trim() === "NO_POST" ||
+    (!parsed && raw.trim() === "NO_POST");
+  if (noPostSignal) throw new Error("NO_POST");
 
   // Resolve format and confidence: prefer what AI chose over our hint
   const VALID_FORMATS: PostFormat[] = ["micro", "short", "medium", "long"];
@@ -362,9 +404,26 @@ export async function generatePostContent(options: {
     ? aiConfidence
     : (hasSource ? "high" : "low");
 
-  const content = sanitizePost(publicText);
-  if (!content) throw new Error("AI returned empty content after sanitization");
+  // Assemble text from structured JSON (headline + paragraphs[] + takeaway)
+  // Falls back to flat public_post_text or raw response if JSON parsing failed
+  let assembled: string;
+  if (parsed) {
+    assembled = assemblePost(parsed);
+    if (!assembled && raw.length > 0) assembled = raw;
+  } else {
+    assembled = raw;
+  }
 
-  logger.info({ resolvedFormat, resolvedConfidence, len: content.length, wasJson: Boolean(parsed) }, "Post generated");
+  // Sanitise (fixes dashes, hashtags, emoji cap, collapses multiple spaces — NOT newlines)
+  const sanitised = sanitizePost(assembled);
+  if (!sanitised) throw new Error("AI returned empty content after sanitization");
+
+  // Validate paragraph structure; auto-reformat wall-of-text posts
+  const content = validateAndReformat(sanitised, resolvedFormat);
+
+  logger.info(
+    { resolvedFormat, resolvedConfidence, len: content.length, breaks: (content.match(/\n\n/g) ?? []).length, wasJson: Boolean(parsed) },
+    "Post generated"
+  );
   return { content, postType: resolvedFormat, confidence: resolvedConfidence };
 }
