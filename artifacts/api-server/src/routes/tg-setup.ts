@@ -305,83 +305,68 @@ router.post("/setup/tg/qr-start", async (req, res): Promise<void> => {
   if (!creds) return;
   const { apiId, apiHash } = creds;
 
+  // Optional 2FA password in case the reader account has it
+  const { password: twoFaPassword } = req.body as { password?: string };
+
   try {
-    const { TelegramClient, Api, StringSession } = loadGram();
+    const { TelegramClient, StringSession } = loadGram();
     const session = new (StringSession as new (s?: string) => unknown)("");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const client = new TelegramClient(session as any, apiId, apiHash, { connectionRetries: 3 });
-    await client.connect();
+    const client = new TelegramClient(session as any, apiId, apiHash, { connectionRetries: 5 });
 
-    const result = await client.invoke(
-      new Api.auth.ExportLoginToken({ apiId, apiHash, exceptIds: [] }),
-    ) as { className: string; token: Buffer; expires: number };
+    const id = randomUUID();
+    const state: QrState = { client, url: "", done: false, sessionString: null, expired: false, apiId, apiHash };
+    qrPending.set(id, state);
 
-    if (result.className !== "auth.LoginToken") {
-      res.status(500).json({ error: `Unexpected result: ${result.className}` });
+    // Wait for the FIRST QR code before responding so the browser gets a URL to display
+    await new Promise<void>((resolveFirst) => {
+      let firstQR = true;
+
+      // client.start() with qrCode callback — gramjs handles UpdateLoginToken internally
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      void (client.start as any)({
+        qrCode: async (code: { token: Buffer; expires: number }) => {
+          const tokenB64 = Buffer.from(code.token).toString("base64url");
+          state.url = `tg://login?token=${tokenB64}`;
+          logger.info({ id }, "QR token generated/refreshed");
+          if (firstQR) {
+            firstQR = false;
+            resolveFirst(); // unblock the HTTP response
+          }
+        },
+        // 2FA: use provided password or resolve with empty (will error if password actually needed)
+        password: async () => twoFaPassword ?? "",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onError: ((err: Error): void => {
+          logger.error({ err, id }, "QR login error");
+          state.expired = true;
+          if (firstQR) { firstQR = false; resolveFirst(); }
+        }) as any,
+      }).then(() => {
+        // start() resolved — user is now logged in
+        state.done = true;
+        state.sessionString = String(client.session.save());
+        logger.info({ id }, "QR login success");
+        void client.disconnect().catch(() => undefined);
+      }).catch((err: Error) => {
+        logger.error({ err, id }, "QR login start() failed");
+        state.expired = true;
+        if (firstQR) { firstQR = false; resolveFirst(); }
+      });
+    });
+
+    if (state.expired || !state.url) {
+      qrPending.delete(id);
+      res.status(500).json({ error: "Failed to generate QR code — check TELEGRAM_API_ID / TELEGRAM_API_HASH" });
       return;
     }
 
-    const tokenB64 = Buffer.from(result.token).toString("base64url");
-    const url = `tg://login?token=${tokenB64}`;
-    const id = randomUUID();
-
-    const state: QrState = {
-      client,
-      url,
-      done: false,
-      sessionString: null,
-      expired: false,
-      apiId,
-      apiHash,
-    };
-    qrPending.set(id, state);
-
-    // Background poll — check every 2 s, refresh token as needed
-    void qrPollLoop(id, state);
-
-    logger.info({ id }, "QR login started");
-    res.json({ ok: true, id, url, expires: result.expires });
+    res.json({ ok: true, id, url: state.url });
   } catch (err) {
     logger.error({ err }, "QR start failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
-
-async function qrPollLoop(id: string, state: QrState): Promise<void> {
-  const { TelegramClient, Api } = loadGram();
-  const client = state.client as InstanceType<typeof TelegramClient>;
-  const { apiId, apiHash } = state;
-
-  for (let i = 0; i < 90; i++) {
-    await sleep(2000);
-    if (!qrPending.has(id)) return; // cleaned up
-    try {
-      const result = await client.invoke(
-        new Api.auth.ExportLoginToken({ apiId, apiHash, exceptIds: [] }),
-      ) as { className: string; token?: Buffer; expires?: number; authorization?: unknown };
-
-      if (result.className === "auth.LoginTokenSuccess") {
-        state.done = true;
-        state.sessionString = String(client.session.save());
-        await client.disconnect();
-        logger.info({ id }, "QR login success");
-        return;
-      }
-
-      if (result.className === "auth.LoginToken" && result.token) {
-        // Token refreshed — update URL so client can re-render QR
-        const newB64 = Buffer.from(result.token).toString("base64url");
-        state.url = `tg://login?token=${newB64}`;
-      }
-    } catch {
-      // connection hiccup — continue polling
-    }
-  }
-
-  state.expired = true;
-  try { await (state.client as InstanceType<typeof TelegramClient>).disconnect(); } catch { /* ignore */ }
-  qrPending.delete(id);
-}
 
 router.post("/setup/tg/qr-check", (req, res): void => {
   if (!requireSecret(req.body as Record<string, unknown>, res)) return;
