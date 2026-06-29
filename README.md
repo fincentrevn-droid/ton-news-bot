@@ -157,19 +157,49 @@ See `.env.example` for the full list with comments.
 
 ## Deploying to Railway
 
-### 1. Create a Railway project
+> ⚠️ **Deploy as ONE single service from the repo root — not one service per package.**
+> This is a pnpm **monorepo**, but it ships as a **single production server**: the Express
+> API serves the API routes **and** the built React dashboard from the same process
+> (see [Build details](#build-details)). Do **not** create separate Railway services for
+> `dashboard`, `api-server`, `db`, `api-zod`, `api-client`, or `api-spec` — those are
+> internal workspace packages, not deployable apps. There is exactly **one** Railway
+> service for this whole repo.
+
+### Single-service rules (read first)
+
+| Setting | Value |
+|---|---|
+| **Source** | The **root** of this GitHub repo (`fincentrevn-droid/ton-news-bot`) |
+| **Root Directory** | empty / `/` — **never** point it at `artifacts/*` or `lib/*` |
+| **Config** | Railway uses the **root `railway.json`** (do not add per-package configs) |
+| **Build command** | `pnpm install --frozen-lockfile && pnpm run build:railway` |
+| **Start command** | `pnpm run start` |
+| **Result** | One server: API on `/api/*` + dashboard on `/*` |
+| **Env variables** | Added to **this one root service only** |
+
+The build/start commands above already live in the root `railway.json`, so a correctly
+configured service picks them up automatically — you should not need to type them by hand.
+
+> **If Railway already split the repo into multiple services:** delete the extra ones
+> (`dashboard`, `api-server`, `db`, `api-zod`, `api-client`, `api-spec`) and keep a single
+> service whose **Root Directory** is `/`. Railway can auto-detect monorepo packages and
+> over-create services — that behavior is wrong for this project.
+
+### 1. Create the single Railway service
 
 1. Go to [railway.app](https://railway.app) → **New Project**
 2. Choose **Deploy from GitHub repo** and connect this repository
-3. Railway will detect `railway.json` and configure the build automatically
+3. In the service **Settings → Source**, confirm **Root Directory** is empty (`/`)
+4. Railway detects the root `railway.json` and configures the build automatically
+5. If Railway offers to create services for detected packages, **decline** — keep only one service
 
 ### 2. Add a PostgreSQL database
 
-In your Railway project → **+ New** → **Database** → **PostgreSQL**. Railway will inject `DATABASE_URL` automatically.
+In your Railway project → **+ New** → **Database** → **PostgreSQL**. Railway will inject `DATABASE_URL` into your single service automatically.
 
 ### 3. Set environment variables
 
-In your Railway service → **Variables**, add all required variables from the table above. The minimum set to get running:
+In your **single** Railway service → **Variables**, add all required variables from the table above. Put **every** variable on this one service (there is no other service to configure). The minimum set to get running:
 
 ```
 OPENAI_API_KEY=sk-...
