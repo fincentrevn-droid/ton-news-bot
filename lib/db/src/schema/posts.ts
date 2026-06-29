@@ -30,9 +30,16 @@ export const postsTable = pgTable("posts", {
 
   // Media from source post
   hasMedia: boolean("has_media").notNull().default(false),
-  mediaType: text("media_type"),             // 'photo' | null
-  mediaFileId: text("media_file_id"),        // Telegram file_id after first upload (for reuse)
-  mediaDownloadStatus: text("media_download_status"), // 'ok' | 'failed' | null
+  mediaType: text("media_type"),
+  mediaFileId: text("media_file_id"),
+  mediaDownloadStatus: text("media_download_status"),
+
+  // ─── Quality control ─────────────────────────────────────────
+  qualityScore: integer("quality_score"),
+  qualityCheckPassed: boolean("quality_check_passed"),
+  qualityIssues: text("quality_issues"),       // JSON array serialized to text
+  safeForAutopublish: boolean("safe_for_autopublish"),
+  rewriteAttempts: integer("rewrite_attempts").notNull().default(0),
 });
 
 export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true, createdAt: true, updatedAt: true });
