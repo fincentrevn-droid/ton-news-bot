@@ -50,12 +50,20 @@ export async function sendTelegramMessage(text: string): Promise<number> {
   return data.result!.message_id;
 }
 
+export interface ReviewMeta {
+  sourceChannel?: string;
+  sourcePreview?: string;
+  sourceLink?: string;
+  confidence?: string;
+}
+
 export async function sendReviewMessage(
   postId: number,
   content: string,
   safetyWarnings: string[] = [],
   postType?: string,
   topic?: string,
+  meta?: ReviewMeta,
 ): Promise<number | null> {
   const token = getBotToken();
   const chatId = getReviewChatId();
@@ -66,6 +74,21 @@ export async function sendReviewMessage(
 
   const label = postType ? `[${postType.toUpperCase()}]` : "";
   const topicLine = topic ? `📌 ${topic}\n\n` : "";
+
+  const sourceBlock =
+    meta?.sourceChannel || meta?.sourcePreview
+      ? [
+          `\n\n📡 <b>Источник:</b> ${meta.sourceChannel ?? "RSS"}`,
+          meta.sourceLink ? `<a href="${meta.sourceLink}">ссылка</a>` : null,
+          meta.confidence ? `· достоверность: <b>${meta.confidence}</b>` : null,
+          meta.sourcePreview
+            ? `\n<i>${escapeHtml(meta.sourcePreview.slice(0, 200))}…</i>`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : "";
+
   const warningBlock =
     safetyWarnings.length > 0
       ? `\n\n⚠️ <b>Удалены подозрительные ссылки:</b>\n${safetyWarnings.map((w) => `• ${w}`).join("\n")}`
@@ -74,6 +97,7 @@ export async function sendReviewMessage(
   const text =
     `${label} <b>Новый черновик #${postId}</b>\n\n` +
     `${topicLine}${escapeHtml(content)}` +
+    sourceBlock +
     warningBlock;
 
   const data = await telegramPost(token, "sendMessage", {

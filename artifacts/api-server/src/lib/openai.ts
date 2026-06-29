@@ -62,136 +62,162 @@ export async function incrementAiUsage(type: "call" | "post" | "rewrite") {
   }
 }
 
-const SYSTEM_PROMPT = `Ты автор Telegram-канала о TON, крипте и экосистеме Telegram.
+// ─── Prompts ────────────────────────────────────────────────────────────────
+
+const SOURCE_SYSTEM_PROMPT = `Ты редактор Telegram-канала о TON, крипте и экосистеме Telegram.
+
+Тебе дан оригинальный текст новости из внешнего источника.
+Твоя задача — написать пост для нашего канала на основе ТОЛЬКО предоставленного текста.
+
+СТРОГИЕ ПРАВИЛА:
+- Используй ТОЛЬКО факты, цифры, имена и даты из текста источника.
+- НЕ придумывай факты которых нет в источнике.
+- НЕ добавляй цены, даты, события, партнёрства, запуски если их нет в исходном тексте.
+- НЕ копируй текст дословно — перепиши своими словами с авторским комментарием.
+- Если информация неофициальная или предварительная — добавь "пока без официального подтверждения".
+- Если источник слабый или неинтересен нашей аудитории — ответь ровно словом: NO_POST
+
+Приоритет тем (по убыванию):
+1. TON / The Open Network
+2. Telegram crypto ecosystem: Gifts, Stars, Fragment, Wallet, mini apps
+3. Durov / Telegram
+4. BTC, ETH, важные crypto-новости
+
+Форматы:
+- micro: 1–3 строки, одна сильная мысль
+- short: 300–600 символов, короткая новость с контекстом
+- medium: 600–1000 символов, пост с контекстом и анализом
+- long: 1000–1500 символов, только для по-настоящему важных тем
+
+Стиль: живой, умный, чуть ироничный, без воды и кликбейта, как у премиального Telegram-канала.
+Запрещено: покупай, продавай, гарантированный рост, иксы, летим, all in, moon soon.
+Эмодзи: 0–2 в коротких, 1–4 в длинных. Только по теме.
+
+Не начинай ответ со слов "Конечно!", "Вот пост:", "Отлично!".`;
+
+const FREE_SYSTEM_PROMPT = `Ты автор Telegram-канала о TON, крипте и экосистеме Telegram.
 
 Канал пишет про:
 - TON и The Open Network
 - Telegram crypto ecosystem: Gifts, Stars, Fragment, Wallet, mini apps
-- Дурова и Telegram — если связано с рынком, технологиями, криптой или экосистемой
-- Важные общие crypto-новости: BTC, ETH, альткоины, рынок, airdrops, биржи, регуляция, безопасность, фонды, ETF, DeFi, стейблкоины, хаки
+- Дурова и Telegram — если связано с рынком, технологиями, криптой
+- Важные общие crypto-новости: BTC, ETH, рынок, DeFi, стейблкоины
 
-Приоритет тем (по убыванию):
-1. TON ecosystem
-2. Telegram crypto ecosystem
-3. Telegram Gifts / Stars / Fragment
-4. Дуров / Telegram
-5. Важные общие crypto-новости
+Форматы:
+- micro: 1–3 строки, одна сильная мысль
+- short: 300–600 символов
+- medium: 600–1000 символов
+- long: 1000–1500 символов (только для очень сильных тем)
 
-Главная идея канала: "Канал о TON, Telegram-крипте и важных движениях крипторынка, которые стоит замечать."
+Стиль: живой, умный, чуть ироничный, без воды и кликбейта.
+Запрещено: покупай, продавай, гарантированный рост, иксы, летим, all in.
+Эмодзи: 0–2 в коротких, 1–4 в длинных.
 
-Задача: написать оригинальный Telegram-пост на основе собранных новостей.
+Не начинай со слов "Конечно!", "Вот пост:", "Отлично!".`;
 
-Перед написанием выбери формат:
-- micro: 1–3 строки. Одна сильная мысль или острое наблюдение.
-- short: 300–600 символов. Короткая новость или живой комментарий.
-- medium: 600–1000 символов. Средний пост с контекстом.
-- long: 1000–1500 символов. Только если тема по-настоящему сильная.
-
-Правила:
-- Если тема слабая — пиши micro или short.
-- Если тема сильная — пиши medium или long.
-- Если это просто наблюдение — достаточно одной строки.
-- Если тема важна для рынка, пост может быть чисто о крипте, без TON и Telegram.
-- Если новость неофициальная — добавь "пока без официального подтверждения".
-- Не давай финансовых советов.
-- Не обещай прибыль.
-- Не используй скамный хайп.
-- 0–2 эмодзи в коротких постах, 1–4 в длинных, micro может быть без эмодзи.
-- Эмодзи должны соответствовать теме: TON, крипта, рынок, предупреждение, огонь/новость, безопасность.
-
-Запрещено: покупай, продавай, гарантированный рост, иксы гарантированы, летим, all in, moon soon, easy x's.
-
-Стиль:
-- живой, умный, чуть ироничный
-- без воды и кликбейта
-- ощущение, что автор сам следит за рынком
-- понятно даже тем, кто не глубоко в крипте
-- не копировать источники, не делать сухой рерайт
-- пост должен ощущаться как премиальный Telegram-канал о крипте
-
-Примеры micro:
-"TON — это уже не просто монета. Это ставка на то, что Telegram сможет встроить крипту в жизнь обычных людей."
-
-"Telegram Gifts выглядят как игрушка. Но иногда массовые рынки начинаются именно с игрушек."
-
-"Крипторынок снова напоминает: сначала скучно, потом больно, потом все делают вид, что так и планировали."
-
-Пример short:
-"TON снова оказался в центре Telegram-движа 👀
-
-На этот раз внимание не только на цене, а на том, как Telegram собирает вокруг себя экономику: Stars, Gifts, Fragment, Wallet и mini apps.
-
-Самое интересное — это уже не выглядит как отдельные фичи. Всё больше похоже на один большой пазл."
-
-Пример pure crypto:
-"BTC снова забрал всё внимание рынка.
-
-И это нормально: когда Bitcoin начинает двигаться, альты обычно превращаются в зрителей. Сначала рынок смотрит на главный актив, потом уже деньги начинают искать риск дальше.
-
-Главное сейчас — не путать шум с трендом. Один сильный день ещё не делает новый цикл, но показывает, где у рынка сейчас нерв."`;
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 export type PostFormat = "micro" | "short" | "medium" | "long";
+export type Confidence = "high" | "medium" | "low";
 
 const FORMAT_INSTRUCTIONS: Record<PostFormat, string> = {
   micro: "Формат: MICRO (1–3 строки). Одна сильная мысль. Никаких лишних слов.",
   short: "Формат: SHORT (300–600 символов). Короткая новость или живой комментарий с контекстом.",
   medium: "Формат: MEDIUM (600–1000 символов). Средний пост с контекстом и анализом.",
-  long: "Формат: LONG (1000–1500 символов). Используй только если тема действительно сильная и требует развёрнутого объяснения.",
+  long: "Формат: LONG (1000–1500 символов). Используй только если тема действительно сильная.",
 };
 
 function chooseFormat(topic?: string): PostFormat {
   if (!topic) return "short";
   const lower = topic.toLowerCase();
-  if (lower.includes("важн") || lower.includes("major") || lower.includes("крупн") || lower.includes("большой")) return "medium";
+  if (lower.includes("важн") || lower.includes("major") || lower.includes("крупн")) return "medium";
   if (lower.length < 50) return "micro";
   return "short";
 }
 
+function chooseFormatFromSource(sourceText: string): PostFormat {
+  const len = sourceText.length;
+  if (len < 200) return "micro";
+  if (len < 600) return "short";
+  return "medium";
+}
+
+// ─── Main generation ─────────────────────────────────────────────────────────
+
 export async function generatePostContent(options: {
   topic?: string;
+  sourceText?: string;
   sourceUrl?: string;
+  sourceChannel?: string;
   additionalContext?: string;
   forceFormat?: PostFormat;
-}): Promise<{ content: string; postType: PostFormat }> {
+}): Promise<{ content: string; postType: PostFormat; confidence: Confidence }> {
   const limit = await checkAiLimitReached();
   if (limit.blocked) throw new Error(limit.reason);
 
   const settings = await getSettings();
   const client = getOpenAIClient();
+  const model = process.env.OPENAI_MODEL ?? settings.openaiModel;
 
-  const format = options.forceFormat ?? chooseFormat(options.topic);
+  const hasSource = Boolean(options.sourceText?.trim());
+  const format = options.forceFormat ?? (
+    hasSource
+      ? chooseFormatFromSource(options.sourceText!)
+      : chooseFormat(options.topic)
+  );
   const formatInstruction = FORMAT_INSTRUCTIONS[format];
 
-  const userMessage = [
-    options.topic
-      ? `Тема/новость: ${options.topic}`
-      : "Придумай актуальный пост для канала о TON, Telegram-крипте и крипторынке.",
-    options.sourceUrl ? `Источник: ${options.sourceUrl}` : null,
-    options.additionalContext ? `Контекст: ${options.additionalContext}` : null,
-    "",
-    formatInstruction,
-    "Напиши оригинальный Telegram-пост. Не начинай с вводных слов типа 'Конечно!' или 'Вот пост:'.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  let systemPrompt: string;
+  let userMessage: string;
 
-  const model = process.env.OPENAI_MODEL ?? settings.openaiModel;
-  logger.info({ format, topic: options.topic, model }, "Generating post with AI");
+  if (hasSource) {
+    systemPrompt = SOURCE_SYSTEM_PROMPT;
+    userMessage = [
+      `Источник: ${options.sourceChannel ?? "RSS"}`,
+      options.sourceUrl ? `Ссылка на оригинал: ${options.sourceUrl}` : null,
+      "",
+      "Текст источника:",
+      '"""',
+      options.sourceText!.slice(0, 1200),
+      '"""',
+      "",
+      formatInstruction,
+      "Напиши пост для нашего канала. Если материал не подходит — ответь: NO_POST",
+    ].filter(Boolean).join("\n");
+  } else {
+    systemPrompt = FREE_SYSTEM_PROMPT;
+    userMessage = [
+      options.topic
+        ? `Тема: ${options.topic}`
+        : "Напиши актуальный пост для канала о TON, Telegram-крипте и крипторынке.",
+      options.sourceUrl ? `Источник: ${options.sourceUrl}` : null,
+      options.additionalContext ? `Контекст: ${options.additionalContext}` : null,
+      "",
+      formatInstruction,
+      "Напиши оригинальный Telegram-пост.",
+    ].filter(Boolean).join("\n");
+  }
+
+  logger.info({ format, hasSource, channel: options.sourceChannel, model }, "Generating post");
 
   const response = await client.chat.completions.create({
     model,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
     ],
     max_completion_tokens: settings.maxTokensPerPost,
-    temperature: 0.85,
+    temperature: hasSource ? 0.75 : 0.85,
   });
 
   await incrementAiUsage("call");
 
   const content = response.choices[0]?.message?.content?.trim() ?? "";
   if (!content) throw new Error("AI returned empty content");
+  if (content.trim() === "NO_POST") {
+    throw new Error("NO_POST");
+  }
 
-  return { content, postType: format };
+  const confidence: Confidence = hasSource ? "high" : "low";
+  return { content, postType: format, confidence };
 }

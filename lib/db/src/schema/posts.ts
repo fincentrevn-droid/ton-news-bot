@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -18,6 +18,15 @@ export const postsTable = pgTable("posts", {
   aiCallsUsed: integer("ai_calls_used").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+
+  sourceChannel: text("source_channel"),
+  sourcePostId: text("source_post_id"),
+  sourceTextHash: text("source_text_hash"),
+  sourceDate: timestamp("source_date", { withTimezone: true }),
+  sourceLink: text("source_link"),
+  generatedFromSource: boolean("generated_from_source").notNull().default(false),
+  sourcePreview: text("source_preview"),
+  confidence: text("confidence"),
 });
 
 export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true, createdAt: true, updatedAt: true });
