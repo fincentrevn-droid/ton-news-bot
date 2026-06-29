@@ -17,8 +17,8 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
-  Activity, FileText, CheckCircle, Clock, Zap, Shield, Bot,
-  AlertTriangle, TrendingUp, Eye, MessageSquare, Repeat2, Link2,
+  Activity, CheckCircle, Clock, Zap, Shield, Bot,
+  AlertTriangle, TrendingUp, Link2,
 } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -90,23 +90,35 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Top row — Channel analytics (placeholders, ready for future integration) */}
+        {/* Top row — Live stats from DB */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <AnalyticCard
-            label="Subscriber Growth (24h)"
+          <StatCard
+            label="На проверке"
+            value={statsLoading ? "–" : (stats?.pendingReview ?? 0)}
+            icon={<Clock className="h-4 w-4 text-yellow-400" />}
+            sub="Ожидают одобрения"
+            highlight={!statsLoading && (stats?.pendingReview ?? 0) > 0}
+            highlightColor="yellow"
+          />
+          <StatCard
+            label="Пропущено"
+            value={statsLoading ? "–" : (stats?.skipped ?? 0)}
+            icon={<Activity className="h-4 w-4 text-slate-400" />}
+            sub="Всего пропущено"
+          />
+          <StatCard
+            label="Отклонено safety"
+            value={statsLoading ? "–" : (stats?.safetyRejected ?? 0)}
+            icon={<Shield className="h-4 w-4 text-red-400" />}
+            sub="Заблокировано фильтром"
+            highlight={!statsLoading && (stats?.safetyRejected ?? 0) > 0}
+            highlightColor="red"
+          />
+          <StatCard
+            label="Активных источников"
+            value={statsLoading ? "–" : (stats?.telegramSourcesCount ?? stats?.sourcesCount ?? 0)}
             icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
-          />
-          <AnalyticCard
-            label="Avg Post Views (24h)"
-            icon={<Eye className="h-4 w-4 text-blue-400" />}
-          />
-          <AnalyticCard
-            label="Avg Comments (24h)"
-            icon={<MessageSquare className="h-4 w-4 text-purple-400" />}
-          />
-          <AnalyticCard
-            label="Post Forwards (24h)"
-            icon={<Repeat2 className="h-4 w-4 text-sky-400" />}
+            sub="Telegram-каналов"
           />
         </div>
 
@@ -258,17 +270,30 @@ export default function Dashboard() {
   );
 }
 
-// Placeholder card for channel analytics not yet connected
-function AnalyticCard({ label, icon }: { label: string; icon: React.ReactNode }) {
+function StatCard({
+  label, value, icon, sub, highlight, highlightColor,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+  sub?: string;
+  highlight?: boolean;
+  highlightColor?: "yellow" | "red";
+}) {
+  const border = highlight
+    ? highlightColor === "red"
+      ? "border-red-500/30 bg-red-500/5"
+      : "border-yellow-500/30 bg-yellow-500/5"
+    : "";
   return (
-    <Card>
+    <Card className={border}>
       <CardContent className="pt-4 pb-3">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-muted-foreground">{label}</span>
           {icon}
         </div>
-        <div className="text-lg font-bold text-muted-foreground">—</div>
-        <p className="text-xs text-muted-foreground/60 mt-0.5">Analytics not connected</p>
+        <div className="text-2xl font-bold">{value}</div>
+        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
       </CardContent>
     </Card>
   );
