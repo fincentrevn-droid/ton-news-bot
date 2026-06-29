@@ -27,15 +27,33 @@ router.patch("/schedule", async (req, res): Promise<void> => {
     return;
   }
   const schedule = await getOrCreateSchedule();
+  const d = parsed.data;
   const updateData: Record<string, unknown> = {};
-  if (parsed.data.enabled !== undefined) updateData.enabled = parsed.data.enabled;
-  if (parsed.data.intervalHours !== undefined) updateData.intervalHours = parsed.data.intervalHours;
-  if (parsed.data.maxPostsPerDay !== undefined) updateData.maxPostsPerDay = parsed.data.maxPostsPerDay;
-  if (parsed.data.autoPublish !== undefined) updateData.autoPublish = parsed.data.autoPublish;
 
-  if (parsed.data.enabled && !schedule.enabled) {
+  if (d.enabled !== undefined) updateData.enabled = d.enabled;
+  if (d.intervalHours !== undefined) updateData.intervalHours = d.intervalHours;
+  if (d.maxPostsPerDay !== undefined) updateData.maxPostsPerDay = d.maxPostsPerDay;
+  if (d.autoPublish !== undefined) updateData.autoPublish = d.autoPublish;
+  // Posting window
+  if (d.postingTimezone !== undefined) updateData.postingTimezone = d.postingTimezone;
+  if (d.postingStartTime !== undefined) updateData.postingStartTime = d.postingStartTime;
+  if (d.postingEndTime !== undefined) updateData.postingEndTime = d.postingEndTime;
+  // Night pause
+  if (d.nightPauseEnabled !== undefined) updateData.nightPauseEnabled = d.nightPauseEnabled;
+  if (d.nightPauseStart !== undefined) updateData.nightPauseStart = d.nightPauseStart;
+  if (d.nightPauseEnd !== undefined) updateData.nightPauseEnd = d.nightPauseEnd;
+  // Daily targets
+  if (d.minPostsPerDay !== undefined) updateData.minPostsPerDay = d.minPostsPerDay;
+  if (d.targetPostsPerDay !== undefined) updateData.targetPostsPerDay = d.targetPostsPerDay;
+  // Spacing
+  if (d.minMinutesBetweenPosts !== undefined) updateData.minMinutesBetweenPosts = d.minMinutesBetweenPosts;
+  if (d.maxMinutesBetweenPosts !== undefined) updateData.maxMinutesBetweenPosts = d.maxMinutesBetweenPosts;
+  if (d.randomDelayEnabled !== undefined) updateData.randomDelayEnabled = d.randomDelayEnabled;
+  if (d.randomDelayMinutes !== undefined) updateData.randomDelayMinutes = d.randomDelayMinutes;
+
+  if (d.enabled && !schedule.enabled) {
     const nextRun = new Date();
-    nextRun.setHours(nextRun.getHours() + (parsed.data.intervalHours ?? schedule.intervalHours));
+    nextRun.setHours(nextRun.getHours() + (d.intervalHours ?? schedule.intervalHours));
     updateData.nextRunAt = nextRun;
   }
 
