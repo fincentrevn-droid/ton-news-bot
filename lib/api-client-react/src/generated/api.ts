@@ -21,6 +21,7 @@ import type {
 
 import type {
   AiUsage,
+  ChannelStats,
   DashboardStats,
   GeneratePostInput,
   HealthStatus,
@@ -1294,6 +1295,83 @@ export function useGetDashboardStats<TData = Awaited<ReturnType<typeof getDashbo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetDashboardStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetChannelStatsUrl = () => {
+
+
+
+
+  return `/api/stats/channel`
+}
+
+/**
+ * @summary Get Telegram channel stats via MTProto (admin)
+ */
+export const getChannelStats = async ( options?: RequestInit): Promise<ChannelStats> => {
+
+  return customFetch<ChannelStats>(getGetChannelStatsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetChannelStatsQueryKey = () => {
+    return [
+    `/api/stats/channel`
+    ] as const;
+    }
+
+
+export const getGetChannelStatsQueryOptions = <TData = Awaited<ReturnType<typeof getChannelStats>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getChannelStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetChannelStatsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getChannelStats>>> = ({ signal }) => getChannelStats({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getChannelStats>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetChannelStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getChannelStats>>>
+export type GetChannelStatsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get Telegram channel stats via MTProto (admin)
+ */
+
+export function useGetChannelStats<TData = Awaited<ReturnType<typeof getChannelStats>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getChannelStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetChannelStatsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

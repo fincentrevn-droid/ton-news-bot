@@ -231,6 +231,19 @@ export interface TriggerResult {
   postsGenerated?: number;
 }
 
+export interface ChannelStats {
+  available: boolean;
+  /** @nullable */
+  subscribersCount: number | null;
+  /** @nullable */
+  avgViews: number | null;
+  /** @nullable */
+  avgComments: number | null;
+  /** @nullable */
+  totalForwards: number | null;
+  postsLast24h: number;
+}
+
 export interface DashboardStats {
   totalPosts: number;
   publishedToday: number;
@@ -280,6 +293,7 @@ export interface Settings {
   enableSecondarySourcesi: boolean;
   customEmojiEnabled: boolean;
   customEmojiFallback: boolean;
+  messageSignature: boolean;
   /** @nullable */
   ownerChatId?: string | null;
   /** @nullable */
@@ -301,6 +315,7 @@ export interface SettingsUpdate {
   enableSecondarySourcesi?: boolean;
   customEmojiEnabled?: boolean;
   customEmojiFallback?: boolean;
+  messageSignature?: boolean;
   ownerChatId?: string;
   reviewChatId?: string;
 }
