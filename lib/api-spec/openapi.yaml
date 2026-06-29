@@ -429,6 +429,17 @@ components:
           type: string
         updatedAt:
           type: string
+        qualityScore:
+          type: ["integer", "null"]
+        qualityCheckPassed:
+          type: ["boolean", "null"]
+        qualityIssues:
+          type: ["string", "null"]
+        safeForAutopublish:
+          type: ["boolean", "null"]
+        rewriteAttempts:
+          type: integer
+          default: 0
 
     PostInput:
       type: object
