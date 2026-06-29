@@ -184,7 +184,7 @@ export async function generatePostContent(options: {
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userMessage },
     ],
-    max_tokens: settings.maxTokensPerPost,
+    max_completion_tokens: settings.maxTokensPerPost,
     temperature: 0.85,
   });
 
