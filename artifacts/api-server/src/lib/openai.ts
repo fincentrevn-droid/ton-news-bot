@@ -427,3 +427,193 @@ export async function generatePostContent(options: {
   );
   return { content, postType: resolvedFormat, confidence: resolvedConfidence };
 }
+
+// ─── Quality control ──────────────────────────────────────────────────────────
+
+const QUALITY_CHECK_SYSTEM_PROMPT = `Ты строгий редактор Telegram-канала TONKOFF о крипте и TON.
+
+Твоя задача — проверить готовый пост перед публикацией.
+
+Проверь:
+1. ИСТОЧНИК: основан только на фактах из источника? нет выдуманных цифр, дат, партнёрств, заявлений?
+2. ФОРМАТИРОВАНИЕ: не стена текста? есть абзацы? читается на мобильном?
+3. СТИЛЬ: звучит как живой автор, а не как пересказ? нет "в источнике пишут", "там сказано", "по данным источника"?
+4. БЕЗОПАСНОСТЬ: нет финансовых советов? нет "покупай/продавай/иксы"? нет подозрительных ссылок?
+5. ЧИСТОТА: нет "—" (длинное тире)? нет "[SHORT]", "Черновик", "confidence", метаданных в тексте?
+6. ОБЩЕЕ: интересно? стоит публиковать?
+
+Верни ТОЛЬКО JSON без преамбул:
+{
+  "quality_score": 0-100,
+  "passed": true/false,
+  "issues": ["список проблем, если есть"],
+  "needs_rewrite": true/false,
+  "rewrite_instruction": "краткая инструкция что исправить (или пустая строка)",
+  "safe_for_autopublish": true/false
+}
+
+Правила оценки:
+- 80-100: можно публиковать автоматически
+- 60-79: нужна доработка
+- 0-59: отправить на ручную проверку`;
+
+export interface QualityCheckResult {
+  quality_score: number;
+  passed: boolean;
+  issues: string[];
+  needs_rewrite: boolean;
+  rewrite_instruction: string;
+  safe_for_autopublish: boolean;
+}
+
+/**
+ * AI quality check: evaluates the post before auto-publishing.
+ * Increments the daily AI calls counter.
+ */
+export async function runQualityCheck(
+  content: string,
+  sourceText?: string,
+): Promise<QualityCheckResult> {
+  const defaultFail: QualityCheckResult = {
+    quality_score: 0,
+    passed: false,
+    issues: ["AI limit reached — quality check skipped"],
+    needs_rewrite: false,
+    rewrite_instruction: "",
+    safe_for_autopublish: false,
+  };
+
+  const limit = await checkAiLimitReached();
+  if (limit.blocked) return defaultFail;
+
+  const client = getOpenAIClient();
+  const settings = await getSettings();
+  const model = process.env.OPENAI_MODEL ?? settings.openaiModel;
+
+  const userMsg = [
+    "Проверь этот пост:",
+    '"""',
+    content,
+    '"""',
+    sourceText
+      ? `\nОригинальный источник:\n"""\n${sourceText.slice(0, 800)}\n"""`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const response = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: QUALITY_CHECK_SYSTEM_PROMPT },
+      { role: "user", content: userMsg },
+    ],
+    max_completion_tokens: 400,
+    temperature: 0.2,
+  });
+
+  await incrementAiUsage("call");
+
+  const raw = response.choices[0]?.message?.content?.trim() ?? "";
+
+  const tryParse = (s: string): QualityCheckResult | null => {
+    try {
+      const obj = JSON.parse(s);
+      if (typeof obj?.quality_score === "number") {
+        return {
+          quality_score: Math.max(0, Math.min(100, obj.quality_score)),
+          passed: Boolean(obj.passed),
+          issues: Array.isArray(obj.issues) ? (obj.issues as string[]) : [],
+          needs_rewrite: Boolean(obj.needs_rewrite),
+          rewrite_instruction: String(obj.rewrite_instruction ?? ""),
+          safe_for_autopublish: Boolean(obj.safe_for_autopublish),
+        };
+      }
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  const direct = tryParse(raw);
+  if (direct) return direct;
+
+  const match = raw.match(/\{[\s\S]*"quality_score"[\s\S]*\}/);
+  if (match) {
+    const extracted = tryParse(match[0]);
+    if (extracted) return extracted;
+  }
+
+  logger.warn({ raw: raw.slice(0, 200) }, "Quality check returned unparseable response — treating as low quality");
+  return { quality_score: 50, passed: false, issues: ["Не удалось получить оценку качества"], needs_rewrite: false, rewrite_instruction: "", safe_for_autopublish: false };
+}
+
+/**
+ * Rewrite a post based on quality check feedback.
+ * Increments the daily rewrite counter.
+ */
+export async function rewriteWithFeedback(opts: {
+  content: string;
+  issues: string[];
+  instruction: string;
+  sourceText?: string;
+  sourceChannel?: string;
+  originalFormat?: PostFormat;
+}): Promise<string> {
+  const limit = await checkAiLimitReached();
+  if (limit.blocked) throw new Error("AI limit reached — cannot rewrite");
+
+  const client = getOpenAIClient();
+  const settings = await getSettings();
+  const model = process.env.OPENAI_MODEL ?? settings.openaiModel;
+
+  const issueList = opts.issues.length > 0
+    ? opts.issues.map((i) => `- ${i}`).join("\n")
+    : "- Общее качество недостаточно";
+
+  const userMsg = [
+    "Улучши пост по замечаниям редактора. Сохрани все факты из источника.",
+    "Не придумывай новых фактов. Исправь только указанные проблемы.",
+    "",
+    "ЗАМЕЧАНИЯ РЕДАКТОРА:",
+    issueList,
+    opts.instruction ? `\nИНСТРУКЦИЯ: ${opts.instruction}` : "",
+    "",
+    "ТЕКУЩИЙ ТЕКСТ ПОСТА:",
+    '"""',
+    opts.content,
+    '"""',
+    opts.sourceText
+      ? `\nОРИГИНАЛЬНЫЙ ИСТОЧНИК:\n"""\n${opts.sourceText.slice(0, 1000)}\n"""`
+      : "",
+    "",
+    "Верни ТОЛЬКО JSON в том же структурированном формате (headline, paragraphs, takeaway).",
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
+
+  const response = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: SOURCE_SYSTEM_PROMPT },
+      { role: "user", content: userMsg },
+    ],
+    max_completion_tokens: settings.maxTokensPerPost,
+    temperature: 0.65,
+  });
+
+  await incrementAiUsage("rewrite");
+
+  const raw = response.choices[0]?.message?.content?.trim() ?? "";
+  if (!raw) return opts.content;
+
+  const parsedJson = parseAiResponse(raw);
+  if (parsedJson) {
+    const assembled = assemblePost(parsedJson);
+    if (assembled) {
+      const sanitised = sanitizePost(assembled);
+      if (sanitised) return validateAndReformat(sanitised, opts.originalFormat ?? "short");
+    }
+  }
+
+  const fallback = sanitizePost(raw);
+  return fallback || opts.content;
+}
