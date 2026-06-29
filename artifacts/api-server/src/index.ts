@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { setupBotCommands, setWebhook } from "./lib/telegram";
+import { startSchedulerLoop } from "./lib/scheduler";
 import { db, sourcesTable } from "@workspace/db";
 import { sql, eq } from "drizzle-orm";
 
@@ -68,6 +69,7 @@ app.listen(port, (err) => {
 
   seedSourcesIfEmpty().catch((err) => logger.warn({ err }, "Source seeding failed"));
   removeAutoSeededRss().catch((err) => logger.warn({ err }, "RSS cleanup failed"));
+  startSchedulerLoop();
 
   // Auto-register Telegram webhook on startup.
   const domain =
