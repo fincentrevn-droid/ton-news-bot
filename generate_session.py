@@ -5,9 +5,15 @@ Usage:
     pip install telethon
     python generate_session.py
 
-The generated TELEGRAM_STRING_SESSION value is printed to stdout.
-Copy it into your Railway (or .env) environment variables.
-Never commit the session string to version control.
+IMPORTANT — use the SEPARATE READER account:
+    Log in with the separate Telegram READER account created only for this
+    bot (the one that reads source channels), NOT your main personal account.
+    The reader account only needs to join/read the source channels listed in
+    artifacts/api-server/src/config/sources.json. It never publishes anything.
+
+The generated TELEGRAM_STRING_SESSION value is ONLY printed to stdout — it is
+never written to any file. Copy it manually into your Railway (or .env)
+environment variables. Never commit the session string to version control.
 """
 
 import asyncio
@@ -16,7 +22,8 @@ from telethon.sessions import StringSession
 
 
 async def main():
-    print("=== TON News Bot — Telegram String Session Generator ===\n")
+    print("=== TON News Bot — Telegram String Session Generator ===")
+    print("Log in with the SEPARATE READER account (not your main account).\n")
 
     api_id_raw = input("Enter TELEGRAM_API_ID (integer): ").strip()
     if not api_id_raw.isdigit():
@@ -29,7 +36,7 @@ async def main():
         print("Error: API_HASH cannot be empty.")
         return
 
-    phone = input("Enter your phone number (international format, e.g. +79001234567): ").strip()
+    phone = input("Enter the READER account's phone number (international, e.g. +79001234567): ").strip()
     if not phone:
         print("Error: Phone number cannot be empty.")
         return
@@ -48,7 +55,8 @@ async def main():
     print("\nCopy the value above and set it as an environment variable:")
     print("  Railway: Settings → Variables → TELEGRAM_STRING_SESSION")
     print("  Local:   add to your .env file")
-    print("\nKeep this value secret — it grants full access to your Telegram account.")
+    print("\nKeep this value secret — it grants full access to the reader Telegram account.")
+    print("It was NOT saved to any file. Paste it manually into Railway Variables only.")
 
 
 if __name__ == "__main__":
