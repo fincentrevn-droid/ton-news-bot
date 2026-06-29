@@ -6,6 +6,7 @@ import scheduleRouter from "./schedule";
 import statsRouter from "./stats";
 import settingsRouter from "./settings";
 import webhookRouter from "./webhook";
+import tgSetupRouter from "./tg-setup";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(scheduleRouter);
 router.use(statsRouter);
 router.use(settingsRouter);
 router.use(webhookRouter);
+router.use(tgSetupRouter);
 
 export default router;
