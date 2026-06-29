@@ -333,7 +333,20 @@ export const GetScheduleResponse = zod.object({
   "maxPostsPerDay": zod.number(),
   "autoPublish": zod.boolean(),
   "nextRunAt": zod.string().nullish(),
-  "lastRunAt": zod.string().nullish()
+  "lastRunAt": zod.string().nullish(),
+  "lastPublishedAt": zod.string().nullish(),
+  "postingTimezone": zod.string(),
+  "postingStartTime": zod.string(),
+  "postingEndTime": zod.string(),
+  "nightPauseEnabled": zod.boolean(),
+  "nightPauseStart": zod.string(),
+  "nightPauseEnd": zod.string(),
+  "minPostsPerDay": zod.number(),
+  "targetPostsPerDay": zod.number(),
+  "minMinutesBetweenPosts": zod.number(),
+  "maxMinutesBetweenPosts": zod.number(),
+  "randomDelayEnabled": zod.boolean(),
+  "randomDelayMinutes": zod.number()
 })
 
 
@@ -344,7 +357,19 @@ export const UpdateScheduleBody = zod.object({
   "enabled": zod.boolean().optional(),
   "intervalHours": zod.number().optional(),
   "maxPostsPerDay": zod.number().optional(),
-  "autoPublish": zod.boolean().optional()
+  "autoPublish": zod.boolean().optional(),
+  "postingTimezone": zod.string().optional(),
+  "postingStartTime": zod.string().optional(),
+  "postingEndTime": zod.string().optional(),
+  "nightPauseEnabled": zod.boolean().optional(),
+  "nightPauseStart": zod.string().optional(),
+  "nightPauseEnd": zod.string().optional(),
+  "minPostsPerDay": zod.number().optional(),
+  "targetPostsPerDay": zod.number().optional(),
+  "minMinutesBetweenPosts": zod.number().optional(),
+  "maxMinutesBetweenPosts": zod.number().optional(),
+  "randomDelayEnabled": zod.boolean().optional(),
+  "randomDelayMinutes": zod.number().optional()
 })
 
 export const UpdateScheduleResponse = zod.object({
@@ -354,7 +379,20 @@ export const UpdateScheduleResponse = zod.object({
   "maxPostsPerDay": zod.number(),
   "autoPublish": zod.boolean(),
   "nextRunAt": zod.string().nullish(),
-  "lastRunAt": zod.string().nullish()
+  "lastRunAt": zod.string().nullish(),
+  "lastPublishedAt": zod.string().nullish(),
+  "postingTimezone": zod.string(),
+  "postingStartTime": zod.string(),
+  "postingEndTime": zod.string(),
+  "nightPauseEnabled": zod.boolean(),
+  "nightPauseStart": zod.string(),
+  "nightPauseEnd": zod.string(),
+  "minPostsPerDay": zod.number(),
+  "targetPostsPerDay": zod.number(),
+  "minMinutesBetweenPosts": zod.number(),
+  "maxMinutesBetweenPosts": zod.number(),
+  "randomDelayEnabled": zod.boolean(),
+  "randomDelayMinutes": zod.number()
 })
 
 
@@ -393,6 +431,19 @@ export const GetDashboardStatsResponse = zod.object({
 
 
 /**
+ * @summary Get Telegram channel stats via MTProto (admin)
+ */
+export const GetChannelStatsResponse = zod.object({
+  "available": zod.boolean(),
+  "subscribersCount": zod.number().nullable(),
+  "avgViews": zod.number().nullable(),
+  "avgComments": zod.number().nullable(),
+  "totalForwards": zod.number().nullable(),
+  "postsLast24h": zod.number()
+})
+
+
+/**
  * @summary Get today's AI usage stats
  */
 export const GetAiUsageResponse = zod.object({
@@ -427,6 +478,7 @@ export const GetSettingsResponse = zod.object({
   "enableSecondarySourcesi": zod.boolean(),
   "customEmojiEnabled": zod.boolean(),
   "customEmojiFallback": zod.boolean(),
+  "messageSignature": zod.boolean(),
   "ownerChatId": zod.string().nullish(),
   "reviewChatId": zod.string().nullish()
 })
@@ -450,6 +502,7 @@ export const UpdateSettingsBody = zod.object({
   "enableSecondarySourcesi": zod.boolean().optional(),
   "customEmojiEnabled": zod.boolean().optional(),
   "customEmojiFallback": zod.boolean().optional(),
+  "messageSignature": zod.boolean().optional(),
   "ownerChatId": zod.string().optional(),
   "reviewChatId": zod.string().optional()
 })
@@ -470,6 +523,7 @@ export const UpdateSettingsResponse = zod.object({
   "enableSecondarySourcesi": zod.boolean(),
   "customEmojiEnabled": zod.boolean(),
   "customEmojiFallback": zod.boolean(),
+  "messageSignature": zod.boolean(),
   "ownerChatId": zod.string().nullish(),
   "reviewChatId": zod.string().nullish()
 })
