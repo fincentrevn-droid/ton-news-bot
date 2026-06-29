@@ -2,7 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { setupBotCommands, setWebhook } from "./lib/telegram";
 import { db, sourcesTable } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -10,13 +10,11 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${process.env.PORT}"`);
 }
 
+// Default seed — Telegram channels only (RSS is secondary, off by default)
 const DEFAULT_SOURCES = [
-  { name: "CoinTelegraph",  url: "https://cointelegraph.com/rss",      type: "rss",              isPrimary: false, category: "crypto" },
-  { name: "Decrypt",        url: "https://decrypt.co/feed",            type: "rss",              isPrimary: false, category: "crypto" },
-  { name: "The Block",      url: "https://www.theblock.co/rss.xml",    type: "rss",              isPrimary: false, category: "crypto" },
-  { name: "TON Blockchain", url: "@ton_blockchain",                    type: "telegram_channel", isPrimary: true,  category: "TON" },
-  { name: "TON Community",  url: "@toncoin",                           type: "telegram_channel", isPrimary: true,  category: "TON" },
-  { name: "Durov",          url: "@durov",                             type: "telegram_channel", isPrimary: true,  category: "Telegram" },
+  { name: "TON Blockchain", url: "@ton_blockchain", type: "telegram_channel", isPrimary: true,  category: "TON" },
+  { name: "TON Community",  url: "@toncoin",        type: "telegram_channel", isPrimary: true,  category: "TON" },
+  { name: "Durov",          url: "@durov",          type: "telegram_channel", isPrimary: true,  category: "Telegram" },
 ];
 
 async function seedSourcesIfEmpty(): Promise<void> {
@@ -33,6 +31,33 @@ async function seedSourcesIfEmpty(): Promise<void> {
   }
 }
 
+// Remove RSS sources that were auto-seeded in older deploys.
+// RSS is off by default; users can add them back via dashboard if needed.
+async function removeAutoSeededRss(): Promise<void> {
+  try {
+    const AUTO_RSS_URLS = [
+      "https://cointelegraph.com/rss",
+      "https://decrypt.co/feed",
+      "https://www.theblock.co/rss.xml",
+      "https://ton.org/feed",
+    ];
+    const rows = await db
+      .select({ id: sourcesTable.id, name: sourcesTable.name, url: sourcesTable.url })
+      .from(sourcesTable)
+      .where(eq(sourcesTable.type, "rss"));
+
+    const toRemove = rows.filter((r) => AUTO_RSS_URLS.includes(r.url));
+    if (toRemove.length === 0) return;
+
+    for (const row of toRemove) {
+      await db.delete(sourcesTable).where(eq(sourcesTable.id, row.id));
+    }
+    logger.info({ removed: toRemove.map((r) => r.name) }, "Removed auto-seeded RSS sources");
+  } catch (err) {
+    logger.warn({ err }, "Could not remove auto-seeded RSS sources");
+  }
+}
+
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -41,11 +66,10 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 
-  // Seed default sources if table is empty
   seedSourcesIfEmpty().catch((err) => logger.warn({ err }, "Source seeding failed"));
+  removeAutoSeededRss().catch((err) => logger.warn({ err }, "RSS cleanup failed"));
 
   // Auto-register Telegram webhook on startup.
-  // Railway injects RAILWAY_PUBLIC_DOMAIN; fallback to WEBHOOK_URL for other hosts.
   const domain =
     process.env.RAILWAY_PUBLIC_DOMAIN ??
     process.env.WEBHOOK_URL ??
