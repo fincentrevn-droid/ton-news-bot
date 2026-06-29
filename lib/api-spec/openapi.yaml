@@ -626,7 +626,7 @@ components:
 
     Settings:
       type: object
-      required: [id, openaiModel, maxAiCallsPerDay, maxPostsPerDay, minPostsPerDay, maxRewritePerPost, maxTokensPerPost, enableCostGuard, autoPublish, postingRequiresApproval, enableSecondarySourcesi, customEmojiEnabled, customEmojiFallback]
+      required: [id, openaiModel, maxAiCallsPerDay, maxPostsPerDay, minPostsPerDay, maxRewritePerPost, maxTokensPerPost, enableCostGuard, autoPublish, postingRequiresApproval, enableSecondarySourcesi, customEmojiEnabled, customEmojiFallback, messageSignature]
       properties:
         id:
           type: integer
@@ -657,6 +657,8 @@ components:
         customEmojiEnabled:
           type: boolean
         customEmojiFallback:
+          type: boolean
+        messageSignature:
           type: boolean
         ownerChatId:
           type: ["string", "null"]
@@ -693,6 +695,8 @@ components:
         customEmojiEnabled:
           type: boolean
         customEmojiFallback:
+          type: boolean
+        messageSignature:
           type: boolean
         ownerChatId:
           type: string

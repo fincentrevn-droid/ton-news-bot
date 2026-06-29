@@ -4,17 +4,21 @@ import {
   useGetAiUsage,
   useListPosts,
   useTriggerGeneration,
+  useGetSettings,
+  useUpdateSettings,
   getListPostsQueryKey,
   getGetDashboardStatsQueryKey,
+  getGetSettingsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
-  Activity, FileText, CheckCircle, Clock, Zap, Shield, Bot, Radio,
-  AlertTriangle, Eye, ToggleLeft, ToggleRight,
+  Activity, FileText, CheckCircle, Clock, Zap, Shield, Bot,
+  AlertTriangle, TrendingUp, Eye, MessageSquare, Repeat2, Link2,
 } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -31,8 +35,10 @@ const STATUS_COLORS: Record<string, string> = {
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
   const { data: aiUsage, isLoading: aiLoading } = useGetAiUsage();
+  const { data: settings, isLoading: settingsLoading } = useGetSettings();
   const { data: recentPosts, isLoading: postsLoading } = useListPosts({ limit: 5 });
   const triggerGen = useTriggerGeneration();
+  const updateSettings = useUpdateSettings();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -50,16 +56,33 @@ export default function Dashboard() {
     });
   };
 
+  const handleToggle = (field: "autoPublish" | "messageSignature", current: boolean) => {
+    updateSettings.mutate(
+      { data: { [field]: !current } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetDashboardStatsQueryKey() });
+        },
+        onError: () => {
+          toast({ title: "Error", description: "Failed to update setting", variant: "destructive" });
+        },
+      },
+    );
+  };
+
   const aiPct = ((aiUsage?.callsUsed ?? 0) / Math.max(aiUsage?.callsLimit ?? 1, 1)) * 100;
   const postsPct = ((aiUsage?.postsGenerated ?? 0) / Math.max(aiUsage?.postsLimit ?? 1, 1)) * 100;
+  const isUpdating = updateSettings.isPending;
 
   return (
     <Layout>
       <div className="space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">TON News Bot — overview and quick actions.</p>
+            <h1 className="text-3xl font-bold tracking-tight">TONKOFF</h1>
+            <p className="text-muted-foreground mt-1">Telegram channel dashboard</p>
           </div>
           <Button onClick={handleGenerate} disabled={triggerGen.isPending} className="gap-2">
             <Zap className="h-4 w-4" />
@@ -67,78 +90,88 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Status bar */}
+        {/* Top row — Channel analytics (placeholders, ready for future integration) */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatusBadgeCard
-            label="AI Model"
-            value={statsLoading ? "…" : (stats?.currentModel ?? "unknown")}
-            icon={<Bot className="h-4 w-4" />}
-            sub="Currently active"
+          <AnalyticCard
+            label="Subscriber Growth (24h)"
+            icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
           />
-          <StatusBadgeCard
-            label="Auto-publish"
-            value={statsLoading ? "…" : (stats?.autoPublish ? "ON" : "OFF")}
-            icon={stats?.autoPublish ? <ToggleRight className="h-4 w-4 text-orange-400" /> : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
-            sub={stats?.autoPublish ? "⚠️ Posts publish without review" : "Manual approval required"}
-            highlight={stats?.autoPublish}
+          <AnalyticCard
+            label="Avg Post Views (24h)"
+            icon={<Eye className="h-4 w-4 text-blue-400" />}
           />
-          <StatusBadgeCard
-            label="Telegram Sources"
-            value={statsLoading ? "…" : String(stats?.telegramSourcesCount ?? 0)}
-            icon={<Radio className="h-4 w-4 text-blue-400" />}
-            sub={`Secondary ${stats?.secondarySourcesEnabled ? "enabled" : "disabled"}`}
+          <AnalyticCard
+            label="Avg Comments (24h)"
+            icon={<MessageSquare className="h-4 w-4 text-purple-400" />}
           />
-          <StatusBadgeCard
-            label="Pending Review"
-            value={statsLoading ? "…" : String(stats?.pendingReview ?? 0)}
-            icon={<Eye className="h-4 w-4 text-yellow-400" />}
-            sub="In Telegram review queue"
+          <AnalyticCard
+            label="Post Forwards (24h)"
+            icon={<Repeat2 className="h-4 w-4 text-sky-400" />}
           />
         </div>
 
-        {/* Metric cards */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Drafts</CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statsLoading ? "–" : stats?.drafts ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">Awaiting action</p>
+        {/* Bottom row — Bot controls */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Auto-publish toggle */}
+          <Card className={settings?.autoPublish ? "border-orange-500/30 bg-orange-500/5" : ""}>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-muted-foreground">Auto-publish</span>
+                <Switch
+                  checked={settings?.autoPublish ?? false}
+                  disabled={settingsLoading || isUpdating}
+                  onCheckedChange={() => handleToggle("autoPublish", settings?.autoPublish ?? false)}
+                />
+              </div>
+              <div className="text-lg font-bold">{settingsLoading ? "…" : (settings?.autoPublish ? "ON" : "OFF")}</div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {settings?.autoPublish ? "⚠️ Posts publish without review" : "Manual approval required"}
+              </p>
             </CardContent>
           </Card>
 
+          {/* Published Today */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Published Today</CardTitle>
-              <CheckCircle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statsLoading ? "–" : stats?.publishedToday ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">Sent to Telegram channel</p>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-muted-foreground">Published Today</span>
+                <CheckCircle className="h-4 w-4 text-green-400" />
+              </div>
+              <div className="text-lg font-bold">{statsLoading ? "–" : (stats?.publishedToday ?? 0)}</div>
+              <p className="text-xs text-muted-foreground mt-0.5">Sent to Telegram channel</p>
             </CardContent>
           </Card>
 
+          {/* AI Model */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Safety Rejected</CardTitle>
-              <Shield className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statsLoading ? "–" : stats?.safetyRejected ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">Blocked as scam/suspicious</p>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-muted-foreground">AI Model</span>
+                <Bot className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="text-lg font-bold font-mono truncate">
+                {statsLoading ? "…" : (stats?.currentModel ?? "unknown")}
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">Currently active</p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Posts</CardTitle>
-              <FileText className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statsLoading ? "–" : stats?.totalPosts ?? 0}</div>
-              <p className="text-xs text-muted-foreground mt-1">All time</p>
+          {/* Message Signature toggle */}
+          <Card className={settings?.messageSignature ? "border-blue-500/20 bg-blue-500/5" : ""}>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-muted-foreground">Message Signature</span>
+                <Switch
+                  checked={settings?.messageSignature ?? false}
+                  disabled={settingsLoading || isUpdating}
+                  onCheckedChange={() => handleToggle("messageSignature", settings?.messageSignature ?? false)}
+                />
+              </div>
+              <div className="text-lg font-bold">{settingsLoading ? "…" : (settings?.messageSignature ? "ON" : "OFF")}</div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                <Link2 className="inline h-3 w-3 mr-0.5 -mt-px" />
+                Social links under posts
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -225,24 +258,17 @@ export default function Dashboard() {
   );
 }
 
-function StatusBadgeCard({
-  label, value, icon, sub, highlight,
-}: {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-  sub?: string;
-  highlight?: boolean;
-}) {
+// Placeholder card for channel analytics not yet connected
+function AnalyticCard({ label, icon }: { label: string; icon: React.ReactNode }) {
   return (
-    <Card className={highlight ? "border-orange-500/30 bg-orange-500/5" : ""}>
+    <Card>
       <CardContent className="pt-4 pb-3">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-muted-foreground">{label}</span>
           {icon}
         </div>
-        <div className="text-lg font-bold">{value}</div>
-        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+        <div className="text-lg font-bold text-muted-foreground">—</div>
+        <p className="text-xs text-muted-foreground/60 mt-0.5">Analytics not connected</p>
       </CardContent>
     </Card>
   );

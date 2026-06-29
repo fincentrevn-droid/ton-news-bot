@@ -20,6 +20,7 @@ export const settingsTable = pgTable("settings", {
   customEmojiFallback: boolean("custom_emoji_fallback").notNull().default(true),
   ownerChatId: text("owner_chat_id"),
   reviewChatId: text("review_chat_id"),
+  messageSignature: boolean("message_signature").notNull().default(false),
 });
 
 export const insertSettingsSchema = createInsertSchema(settingsTable).omit({ id: true });
