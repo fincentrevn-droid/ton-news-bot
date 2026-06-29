@@ -30,6 +30,120 @@ interface PendingAuth {
 
 const pending = new Map<string, PendingAuth>();
 
+// ── HTML setup page ──────────────────────────────────────────────────────────
+router.get("/setup/tg", (_req, res): void => {
+  const secret = process.env.TELEGRAM_SETUP_SECRET;
+  if (!secret) {
+    res.send(`<html><body style="font-family:sans-serif;max-width:500px;margin:60px auto;padding:0 20px">
+      <h2>⚠️ Не настроено</h2>
+      <p>Добавь в Railway Variables:</p>
+      <pre style="background:#f4f4f4;padding:12px;border-radius:6px">TELEGRAM_SETUP_SECRET=любой_пароль</pre>
+      <p>Потом перезапусти сервис и открой эту страницу снова.</p>
+    </body></html>`);
+    return;
+  }
+  res.send(`<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telegram Session Setup</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:0 20px;color:#1a1a1a}
+  h1{font-size:1.4rem;margin-bottom:4px}
+  p.sub{color:#666;margin-top:0;font-size:.9rem}
+  label{display:block;margin-top:16px;font-weight:600;font-size:.9rem}
+  input{width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid #ccc;border-radius:8px;font-size:1rem;margin-top:4px}
+  button{margin-top:20px;width:100%;padding:11px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:1rem;cursor:pointer}
+  button:hover{background:#1d4ed8}
+  .box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-top:12px}
+  .step{font-size:.8rem;font-weight:700;text-transform:uppercase;color:#2563eb;letter-spacing:.05em;margin-bottom:8px}
+  #result{margin-top:20px;white-space:pre-wrap;background:#f4f4f4;padding:14px;border-radius:8px;font-size:.85rem;display:none}
+  .err{color:#dc2626}
+  .ok{color:#16a34a}
+</style>
+</head>
+<body>
+<h1>📱 Telegram Session Setup</h1>
+<p class="sub">Одноразовая авторизация для чтения каналов</p>
+
+<div class="box" id="step1box">
+  <div class="step">Шаг 1 — Отправить код</div>
+  <label>Секретный пароль (TELEGRAM_SETUP_SECRET)</label>
+  <input id="secret" type="password" placeholder="твой секрет из Railway Variables">
+  <label>Номер телефона</label>
+  <input id="phone" type="tel" placeholder="+79001234567">
+  <button onclick="sendCode()">Отправить код в Telegram</button>
+</div>
+
+<div class="box" id="step2box" style="display:none">
+  <div class="step">Шаг 2 — Ввести код</div>
+  <p style="margin:0 0 12px;font-size:.9rem">Код пришёл в Telegram-приложение — проверь телефон, десктоп или веб-версию.</p>
+  <label>Код из Telegram</label>
+  <input id="code" type="text" placeholder="12345" maxlength="10">
+  <label>Пароль 2FA (если есть, иначе оставь пустым)</label>
+  <input id="twofa" type="password" placeholder="необязательно">
+  <button onclick="signIn()">Войти и получить сессию</button>
+</div>
+
+<div id="result"></div>
+
+<script>
+let phoneVal = '', hashVal = '', secretVal = '';
+
+async function sendCode() {
+  secretVal = document.getElementById('secret').value.trim();
+  phoneVal  = document.getElementById('phone').value.trim();
+  if (!secretVal || !phoneVal) { alert('Заполни оба поля'); return; }
+  showResult('⏳ Отправляю запрос...');
+  try {
+    const r = await fetch('/api/setup/tg/send-code', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ secret: secretVal, phone: phoneVal })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      hashVal = d.phoneCodeHash;
+      showResult('✅ Код отправлен! Проверь Telegram (телефон, десктоп или web.telegram.org).', true);
+      document.getElementById('step2box').style.display = 'block';
+    } else {
+      showResult('❌ Ошибка: ' + (d.error || JSON.stringify(d)), false);
+    }
+  } catch(e) { showResult('❌ ' + e.message, false); }
+}
+
+async function signIn() {
+  const code  = document.getElementById('code').value.trim();
+  const twofa = document.getElementById('twofa').value.trim();
+  if (!code) { alert('Введи код из Telegram'); return; }
+  showResult('⏳ Авторизуюсь...');
+  try {
+    const body = { secret: secretVal, phone: phoneVal, phoneCodeHash: hashVal, code };
+    if (twofa) body.password = twofa;
+    const r = await fetch('/api/setup/tg/sign-in', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showResult('✅ Готово! Скопируй значение TELEGRAM_STRING_SESSION:\\n\\n' + d.sessionString + '\\n\\nДобавь в Railway Variables, потом удали TELEGRAM_SETUP_SECRET и задеплой.', true);
+    } else {
+      showResult('❌ ' + (d.error || JSON.stringify(d)), false);
+    }
+  } catch(e) { showResult('❌ ' + e.message, false); }
+}
+
+function showResult(msg, ok) {
+  const el = document.getElementById('result');
+  el.style.display = 'block';
+  el.textContent = msg;
+  el.className = ok === true ? 'ok' : ok === false ? 'err' : '';
+}
+</script>
+</body>
+</html>`);
+});
+
 function requireSecret(
   body: Record<string, unknown>,
   res: Parameters<Parameters<typeof router.post>[1]>[1],
