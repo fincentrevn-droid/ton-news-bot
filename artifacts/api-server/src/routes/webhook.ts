@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { eq, sql, and, gte } from "drizzle-orm";
-import { db, postsTable, sourcesTable } from "@workspace/db";
+import { db, postsTable, sourcesTable, schedulesTable } from "@workspace/db";
 import { generatePostContent, incrementAiUsage, getOrCreateTodayUsage, getSettings } from "../lib/openai";
 import { sendTelegramMessage, sendPhotoPost, sendReviewMessage, answerCallbackQuery, notifyOwner } from "../lib/telegram";
 import { fetchSourcePosts } from "../lib/sources";
 import { checkSafety, cleanContent } from "../lib/safety";
+import { isInActiveWindow } from "../lib/scheduler";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -263,6 +264,20 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
   }
 }
 
+/** Quality check for auto-publish eligibility */
+function qualifiesForAutoPublish(opts: {
+  confidence: string;
+  safety: { status: string };
+  content: string;
+}): boolean {
+  if (opts.confidence === "low") return false;
+  if (opts.safety.status === "rejected" || opts.safety.status === "warning") return false;
+  if (!opts.content.trim()) return false;
+  // Must have at least one paragraph break (formatting check)
+  if (!opts.content.includes("\n\n")) return false;
+  return true;
+}
+
 async function generateFromSources(
   sendReply: (msg: string) => Promise<void>,
 ): Promise<void> {
@@ -339,15 +354,17 @@ async function generateFromSources(
   const hasMedia = candidate.mediaType === "photo" && Boolean(candidate.mediaBuffer);
   const sourceType = candidate.channelUrl.startsWith("@") ? "telegram_channel" : "rss";
 
-  // ── Send review (with photo if available) ─────────────────────────────────
-  const reviewMeta = {
-    sourceChannel: candidate.channel,
-    sourcePreview: candidate.preview,
-    sourceLink: candidate.link || undefined,
-    confidence,
-  };
+  // ── Decide: auto-publish queue or manual review ───────────────────────────
+  const schedRows = await db.select().from(schedulesTable).limit(1);
+  const schedule = schedRows[0];
 
-  // Insert post first to get the ID
+  const autoPublishEnabled = schedule?.autoPublish ?? false;
+  const inWindow = schedule ? isInActiveWindow(schedule) : false;
+
+  const qualifies = qualifiesForAutoPublish({ confidence, safety, content: cleanedContent });
+  const routeToQueue = autoPublishEnabled && qualifies;
+
+  // Insert post
   const [post] = await db.insert(postsTable).values({
     content: cleanedContent,
     postType,
@@ -368,6 +385,28 @@ async function generateFromSources(
     mediaDownloadStatus: hasMedia ? "ok" : null,
   }).returning();
 
+  if (routeToQueue) {
+    // Leave as draft (no review message) — scheduler ticker will publish it with proper spacing
+    const windowNote = inWindow ? "" : " (сейчас ночная пауза — опубликуется позже)";
+    const photoNote = hasMedia ? " с фото 📷" : "";
+    logger.info(
+      { postId: post.id, inWindow, confidence, safety: safety.status },
+      "Post queued for auto-publish"
+    );
+    await sendReply(
+      `⏳ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote} добавлен в очередь авто-публикации${windowNote}.`
+    );
+    return;
+  }
+
+  // Manual review flow: send review message with ✅ / 🔁 / ❌ buttons
+  const reviewMeta = {
+    sourceChannel: candidate.channel,
+    sourcePreview: candidate.preview,
+    sourceLink: candidate.link || undefined,
+    confidence,
+  };
+
   const { messageId: reviewMsgId, fileId } = await sendReviewMessage(
     post.id,
     cleanedContent,
@@ -378,7 +417,6 @@ async function generateFromSources(
     hasMedia ? candidate.mediaBuffer : undefined,
   );
 
-  // Update post with review message ID and file_id (if photo was uploaded)
   const updateFields: Record<string, unknown> = {};
   if (reviewMsgId) updateFields.reviewMessageId = reviewMsgId;
   if (fileId) updateFields.mediaFileId = fileId;
