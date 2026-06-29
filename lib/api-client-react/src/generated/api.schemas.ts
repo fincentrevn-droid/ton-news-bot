@@ -71,6 +71,15 @@ export interface Post {
   aiCallsUsed?: number;
   createdAt: string;
   updatedAt?: string;
+  /** @nullable */
+  qualityScore?: number | null;
+  /** @nullable */
+  qualityCheckPassed?: boolean | null;
+  /** @nullable */
+  qualityIssues?: string | null;
+  /** @nullable */
+  safeForAutopublish?: boolean | null;
+  rewriteAttempts?: number;
 }
 
 export type PostInputPostType = typeof PostInputPostType[keyof typeof PostInputPostType];
