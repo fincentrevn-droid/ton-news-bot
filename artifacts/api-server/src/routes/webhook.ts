@@ -263,32 +263,50 @@ async function generateFromSources(
     .where(and(gte(postsTable.createdAt, sevenDaysAgo), eq(postsTable.generatedFromSource, true)));
 
   const usedHashes = new Set(recentHashes.map((r) => r.hash).filter(Boolean));
-  const unused = sourcePosts.filter((p) => !usedHashes.has(p.textHash));
-  const candidate = unused[0] ?? sourcePosts[0];
 
-  logger.info(
-    { channel: candidate.channel, score: candidate.relevanceScore, hash: candidate.textHash },
-    "Selected source post for generation",
-  );
+  // Try candidates in order, skipping used and NO_POST ones (max 5 attempts)
+  const candidates = sourcePosts.filter((p) => !usedHashes.has(p.textHash));
+  if (candidates.length === 0) candidates.push(...sourcePosts); // fallback: reuse
 
-  await sendReply(`📰 Источник: <b>${candidate.channel}</b>\n\n🤖 Генерирую пост...`);
+  let content: string | null = null;
+  let postType: "micro" | "short" | "medium" | "long" = "short";
+  let confidence = "medium";
+  let candidate = candidates[0];
+  const skippedHashes = new Set<string>();
 
-  let content: string;
-  let postType: "micro" | "short" | "medium" | "long";
-  let confidence: string;
+  for (let attempt = 0; attempt < Math.min(candidates.length, 5); attempt++) {
+    const pick = candidates.find((p) => !skippedHashes.has(p.textHash)) ?? candidates[0];
+    candidate = pick;
 
-  try {
-    ({ content, postType, confidence } = await generatePostContent({
-      sourceText: candidate.fullText,
-      sourceUrl: candidate.link,
-      sourceChannel: candidate.channel,
-    }));
-  } catch (err) {
-    if (err instanceof Error && err.message === "NO_POST") {
-      await sendReply(`ℹ️ Источник "${candidate.channel}" признан неподходящим для поста. Попробуйте ещё раз — будет выбран другой источник.`);
-      return;
+    logger.info(
+      { attempt, channel: candidate.channel, score: candidate.relevanceScore, hash: candidate.textHash },
+      "Trying source post for generation",
+    );
+
+    if (attempt === 0) {
+      await sendReply(`📰 Источник: <b>${candidate.channel}</b>\n\n🤖 Генерирую пост...`);
     }
-    throw err;
+
+    try {
+      ({ content, postType, confidence } = await generatePostContent({
+        sourceText: candidate.fullText,
+        sourceUrl: candidate.link,
+        sourceChannel: candidate.channel,
+      }));
+      break; // success — exit loop
+    } catch (err) {
+      if (err instanceof Error && err.message === "NO_POST") {
+        logger.info({ channel: candidate.channel }, "Source returned NO_POST — trying next");
+        skippedHashes.add(candidate.textHash);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (!content) {
+    await sendReply(`ℹ️ Все доступные источники за сегодня признаны неподходящими для поста. Попробуйте позже — появятся новые материалы.`);
+    return;
   }
 
   const safety = checkSafety(content);

@@ -111,6 +111,9 @@ function scoreRelevance(post: Omit<SourcePost, "relevanceScore">): number {
 }
 
 async function fetchRssPosts(): Promise<SourcePost[]> {
+  // Secondary (RSS) sources are OFF by default — enabled only when ENABLE_SECONDARY_SOURCES=true
+  if (process.env.ENABLE_SECONDARY_SOURCES !== "true") return [];
+
   const sources = await db
     .select()
     .from(sourcesTable)
