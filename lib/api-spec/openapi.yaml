@@ -325,6 +325,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/DashboardStats"
 
+  /stats/channel:
+    get:
+      operationId: getChannelStats
+      tags: [stats]
+      summary: Get Telegram channel stats via MTProto (admin)
+      responses:
+        "200":
+          description: Channel stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelStats"
+
   /stats/ai-usage:
     get:
       operationId: getAiUsage
@@ -560,6 +573,23 @@ components:
         message:
           type: string
         postsGenerated:
+          type: integer
+
+    ChannelStats:
+      type: object
+      required: [subscribersCount, avgViews, avgComments, totalForwards, postsLast24h, available]
+      properties:
+        available:
+          type: boolean
+        subscribersCount:
+          type: ["integer", "null"]
+        avgViews:
+          type: ["integer", "null"]
+        avgComments:
+          type: ["integer", "null"]
+        totalForwards:
+          type: ["integer", "null"]
+        postsLast24h:
           type: integer
 
     DashboardStats:

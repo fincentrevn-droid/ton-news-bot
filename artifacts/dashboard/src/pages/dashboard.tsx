@@ -2,6 +2,7 @@ import { Layout } from "@/components/layout/Layout";
 import {
   useGetDashboardStats,
   useGetAiUsage,
+  useGetChannelStats,
   useListPosts,
   useTriggerGeneration,
   useGetSettings,
@@ -17,8 +18,9 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
-  Activity, CheckCircle, Clock, Zap, Shield, Bot,
+  Activity, CheckCircle, Zap, Shield, Bot,
   AlertTriangle, TrendingUp, Link2,
+  Eye, MessageSquare, Repeat2,
 } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +37,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
   const { data: aiUsage, isLoading: aiLoading } = useGetAiUsage();
+  const { data: channel, isLoading: channelLoading } = useGetChannelStats();
   const { data: settings, isLoading: settingsLoading } = useGetSettings();
   const { data: recentPosts, isLoading: postsLoading } = useListPosts({ limit: 5 });
   const triggerGen = useTriggerGeneration();
@@ -90,35 +93,31 @@ export default function Dashboard() {
           </Button>
         </div>
 
-        {/* Top row — Live stats from DB */}
+        {/* Top row — Live Telegram channel analytics via MTProto */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="На проверке"
-            value={statsLoading ? "–" : (stats?.pendingReview ?? 0)}
-            icon={<Clock className="h-4 w-4 text-yellow-400" />}
-            sub="Ожидают одобрения"
-            highlight={!statsLoading && (stats?.pendingReview ?? 0) > 0}
-            highlightColor="yellow"
-          />
-          <StatCard
-            label="Пропущено"
-            value={statsLoading ? "–" : (stats?.skipped ?? 0)}
-            icon={<Activity className="h-4 w-4 text-slate-400" />}
-            sub="Всего пропущено"
-          />
-          <StatCard
-            label="Отклонено safety"
-            value={statsLoading ? "–" : (stats?.safetyRejected ?? 0)}
-            icon={<Shield className="h-4 w-4 text-red-400" />}
-            sub="Заблокировано фильтром"
-            highlight={!statsLoading && (stats?.safetyRejected ?? 0) > 0}
-            highlightColor="red"
-          />
-          <StatCard
-            label="Активных источников"
-            value={statsLoading ? "–" : (stats?.telegramSourcesCount ?? stats?.sourcesCount ?? 0)}
+            label="Подписчики"
+            value={channelLoading ? "…" : (channel?.subscribersCount?.toLocaleString("ru-RU") ?? "–")}
             icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
-            sub="Telegram-каналов"
+            sub={channel?.available === false ? "MTProto не подключён" : "Всего на канале"}
+          />
+          <StatCard
+            label="Средние просмотры (24ч)"
+            value={channelLoading ? "…" : (channel?.avgViews?.toLocaleString("ru-RU") ?? "–")}
+            icon={<Eye className="h-4 w-4 text-blue-400" />}
+            sub={channel?.postsLast24h ? `за ${channel.postsLast24h} поста` : "нет постов за 24ч"}
+          />
+          <StatCard
+            label="Средние комменты (24ч)"
+            value={channelLoading ? "…" : (channel?.avgComments?.toLocaleString("ru-RU") ?? "–")}
+            icon={<MessageSquare className="h-4 w-4 text-purple-400" />}
+            sub={channel?.postsLast24h ? `за ${channel.postsLast24h} поста` : "нет постов за 24ч"}
+          />
+          <StatCard
+            label="Форварды (24ч)"
+            value={channelLoading ? "…" : (channel?.totalForwards?.toLocaleString("ru-RU") ?? "–")}
+            icon={<Repeat2 className="h-4 w-4 text-sky-400" />}
+            sub="Суммарно за 24ч"
           />
         </div>
 

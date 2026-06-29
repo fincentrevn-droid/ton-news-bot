@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, postsTable, sourcesTable, aiUsageTable, settingsTable } from "@workspace/db";
 import { eq, and, gte, sql } from "drizzle-orm";
 import { getOrCreateTodayUsage, getSettings } from "../lib/openai";
+import { getChannelStats, isTelegramReaderAvailable } from "../lib/telegram-reader";
 
 const router = Router();
 
@@ -66,6 +67,19 @@ router.get("/stats/dashboard", async (_req, res): Promise<void> => {
     currentModel,
     secondarySourcesEnabled: settings.enableSecondarySourcesi,
   });
+});
+
+router.get("/stats/channel", async (_req, res): Promise<void> => {
+  if (!isTelegramReaderAvailable()) {
+    res.json({ available: false, subscribersCount: null, avgViews: null, avgComments: null, totalForwards: null, postsLast24h: 0 });
+    return;
+  }
+  const stats = await getChannelStats();
+  if (!stats) {
+    res.json({ available: false, subscribersCount: null, avgViews: null, avgComments: null, totalForwards: null, postsLast24h: 0 });
+    return;
+  }
+  res.json({ available: true, ...stats });
 });
 
 router.get("/stats/ai-usage", async (_req, res): Promise<void> => {
