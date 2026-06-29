@@ -1,0 +1,700 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: TON News Bot API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: posts
+    description: Telegram post management
+  - name: sources
+    description: News source management
+  - name: schedule
+    description: Scheduling and automation
+  - name: stats
+    description: Dashboard statistics
+  - name: settings
+    description: Bot settings
+  - name: ai-usage
+    description: AI usage tracking
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /posts:
+    get:
+      operationId: listPosts
+      tags: [posts]
+      summary: List all posts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, approved, published, rejected, skipped]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Post"
+    post:
+      operationId: createPost
+      tags: [posts]
+      summary: Create a new post manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /posts/{id}:
+    get:
+      operationId: getPost
+      tags: [posts]
+      summary: Get a single post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "404":
+          description: Not found
+    patch:
+      operationId: updatePost
+      tags: [posts]
+      summary: Update a post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostUpdate"
+      responses:
+        "200":
+          description: Updated post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+    delete:
+      operationId: deletePost
+      tags: [posts]
+      summary: Delete a post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /posts/{id}/publish:
+    post:
+      operationId: publishPost
+      tags: [posts]
+      summary: Publish a post to Telegram immediately
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /posts/{id}/regenerate:
+    post:
+      operationId: regeneratePost
+      tags: [posts]
+      summary: Regenerate post content with AI
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Regenerated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /posts/generate:
+    post:
+      operationId: generatePost
+      tags: [posts]
+      summary: Generate a new AI post from topics/news
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratePostInput"
+      responses:
+        "201":
+          description: Generated post (sent to review if approval required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /sources:
+    get:
+      operationId: listSources
+      tags: [sources]
+      summary: List news sources
+      responses:
+        "200":
+          description: List of sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Source"
+    post:
+      operationId: createSource
+      tags: [sources]
+      summary: Add a news source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Source"
+
+  /sources/{id}:
+    patch:
+      operationId: updateSource
+      tags: [sources]
+      summary: Update a source
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Source"
+    delete:
+      operationId: deleteSource
+      tags: [sources]
+      summary: Delete a source
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /schedule:
+    get:
+      operationId: getSchedule
+      tags: [schedule]
+      summary: Get current schedule configuration
+      responses:
+        "200":
+          description: Schedule config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+    patch:
+      operationId: updateSchedule
+      tags: [schedule]
+      summary: Update schedule configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleUpdate"
+      responses:
+        "200":
+          description: Updated schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+
+  /schedule/trigger:
+    post:
+      operationId: triggerGeneration
+      tags: [schedule]
+      summary: Manually trigger news fetch + post generation cycle
+      responses:
+        "200":
+          description: Triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerResult"
+
+  /stats/dashboard:
+    get:
+      operationId: getDashboardStats
+      tags: [stats]
+      summary: Get dashboard summary stats
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /stats/ai-usage:
+    get:
+      operationId: getAiUsage
+      tags: [ai-usage]
+      summary: Get today's AI usage stats
+      responses:
+        "200":
+          description: AI usage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiUsage"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get bot settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update bot settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+
+    Post:
+      type: object
+      required: [id, content, status, postType, sourceType, safetyStatus, createdAt]
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        status:
+          type: string
+          enum: [draft, approved, published, rejected, skipped]
+        postType:
+          type: string
+          enum: [micro, short, medium, long]
+        topic:
+          type: ["string", "null"]
+        sourceUrl:
+          type: ["string", "null"]
+        sourceType:
+          type: string
+          enum: [telegram, rss, web, manual]
+        safetyStatus:
+          type: string
+          enum: [ok, flagged, rejected]
+        reviewMessageId:
+          type: ["integer", "null"]
+        telegramMessageId:
+          type: ["integer", "null"]
+        publishedAt:
+          type: ["string", "null"]
+        scheduledAt:
+          type: ["string", "null"]
+        aiCallsUsed:
+          type: integer
+          default: 0
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    PostInput:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        postType:
+          type: string
+          enum: [micro, short, medium, long]
+        topic:
+          type: string
+        sourceUrl:
+          type: string
+        sourceType:
+          type: string
+          enum: [telegram, rss, web, manual]
+        scheduledAt:
+          type: string
+
+    PostUpdate:
+      type: object
+      properties:
+        content:
+          type: string
+        status:
+          type: string
+          enum: [draft, approved, rejected, skipped]
+        scheduledAt:
+          type: ["string", "null"]
+        postType:
+          type: string
+          enum: [micro, short, medium, long]
+
+    GeneratePostInput:
+      type: object
+      properties:
+        topic:
+          type: string
+        sourceUrl:
+          type: string
+        sourceType:
+          type: string
+          enum: [telegram, rss, web, manual]
+        forceFormat:
+          type: string
+          enum: [micro, short, medium, long]
+
+    Source:
+      type: object
+      required: [id, name, url, type, isPrimary, enabled, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        url:
+          type: string
+        type:
+          type: string
+          enum: [rss, telegram_channel, manual]
+        isPrimary:
+          type: boolean
+        enabled:
+          type: boolean
+        category:
+          type: ["string", "null"]
+        lastFetchedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    SourceInput:
+      type: object
+      required: [name, url, type]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        type:
+          type: string
+          enum: [rss, telegram_channel, manual]
+        isPrimary:
+          type: boolean
+        category:
+          type: string
+        enabled:
+          type: boolean
+
+    SourceUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        enabled:
+          type: boolean
+        isPrimary:
+          type: boolean
+        category:
+          type: string
+
+    Schedule:
+      type: object
+      required: [id, enabled, intervalHours, maxPostsPerDay, autoPublish]
+      properties:
+        id:
+          type: integer
+        enabled:
+          type: boolean
+        intervalHours:
+          type: integer
+        maxPostsPerDay:
+          type: integer
+        autoPublish:
+          type: boolean
+        nextRunAt:
+          type: ["string", "null"]
+        lastRunAt:
+          type: ["string", "null"]
+
+    ScheduleUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        intervalHours:
+          type: integer
+        maxPostsPerDay:
+          type: integer
+        autoPublish:
+          type: boolean
+
+    TriggerResult:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        postsGenerated:
+          type: integer
+
+    DashboardStats:
+      type: object
+      required: [totalPosts, publishedToday, drafts, aiCallsToday, aiCallsLimit, sourcesCount, pendingReview, safetyRejected, autoPublish, postingRequiresApproval, currentModel, secondarySourcesEnabled, telegramSourcesCount]
+      properties:
+        totalPosts:
+          type: integer
+        publishedToday:
+          type: integer
+        drafts:
+          type: integer
+        approved:
+          type: integer
+        rejected:
+          type: integer
+        skipped:
+          type: integer
+        pendingReview:
+          type: integer
+        safetyRejected:
+          type: integer
+        aiCallsToday:
+          type: integer
+        aiCallsLimit:
+          type: integer
+        sourcesCount:
+          type: integer
+        telegramSourcesCount:
+          type: integer
+        lastPublishedAt:
+          type: ["string", "null"]
+        autoPublish:
+          type: boolean
+        postingRequiresApproval:
+          type: boolean
+        currentModel:
+          type: string
+        secondarySourcesEnabled:
+          type: boolean
+
+    AiUsage:
+      type: object
+      required: [date, callsUsed, callsLimit, postsGenerated, postsLimit, costGuardEnabled]
+      properties:
+        date:
+          type: string
+        callsUsed:
+          type: integer
+        callsLimit:
+          type: integer
+        postsGenerated:
+          type: integer
+        postsLimit:
+          type: integer
+        rewritesUsed:
+          type: integer
+        rewritesLimit:
+          type: integer
+        costGuardEnabled:
+          type: boolean
+        limitReached:
+          type: boolean
+
+    Settings:
+      type: object
+      required: [id, openaiModel, maxAiCallsPerDay, maxPostsPerDay, minPostsPerDay, maxRewritePerPost, maxTokensPerPost, enableCostGuard, autoPublish, postingRequiresApproval, enableSecondarySourcesi, customEmojiEnabled, customEmojiFallback]
+      properties:
+        id:
+          type: integer
+        openaiModel:
+          type: string
+        maxAiCallsPerDay:
+          type: integer
+        maxPostsPerDay:
+          type: integer
+        minPostsPerDay:
+          type: integer
+        maxRewritePerPost:
+          type: integer
+        maxTokensPerPost:
+          type: integer
+        maxSourcePostsPerChannel:
+          type: integer
+        lookbackHours:
+          type: integer
+        enableCostGuard:
+          type: boolean
+        autoPublish:
+          type: boolean
+        postingRequiresApproval:
+          type: boolean
+        enableSecondarySourcesi:
+          type: boolean
+        customEmojiEnabled:
+          type: boolean
+        customEmojiFallback:
+          type: boolean
+        ownerChatId:
+          type: ["string", "null"]
+        reviewChatId:
+          type: ["string", "null"]
+
+    SettingsUpdate:
+      type: object
+      properties:
+        openaiModel:
+          type: string
+        maxAiCallsPerDay:
+          type: integer
+        maxPostsPerDay:
+          type: integer
+        minPostsPerDay:
+          type: integer
+        maxRewritePerPost:
+          type: integer
+        maxTokensPerPost:
+          type: integer
+        maxSourcePostsPerChannel:
+          type: integer
+        lookbackHours:
+          type: integer
+        enableCostGuard:
+          type: boolean
+        autoPublish:
+          type: boolean
+        postingRequiresApproval:
+          type: boolean
+        enableSecondarySourcesi:
+          type: boolean
+        customEmojiEnabled:
+          type: boolean
+        customEmojiFallback:
+          type: boolean
+        ownerChatId:
+          type: string
+        reviewChatId:
+          type: string

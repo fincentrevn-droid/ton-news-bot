@@ -1,0 +1,25 @@
+{
+  "primary_sources": [
+    { "name": "TON Blockchain", "url": "@ton_blockchain", "type": "telegram_channel", "category": "TON" },
+    { "name": "Durov", "url": "@durov", "type": "telegram_channel", "category": "Telegram" },
+    { "name": "Telegram", "url": "@telegram", "type": "telegram_channel", "category": "Telegram" },
+    { "name": "TON Community", "url": "@toncoin", "type": "telegram_channel", "category": "TON" },
+    { "name": "TON Foundation", "url": "@the_open_network", "type": "telegram_channel", "category": "TON" }
+  ],
+  "secondary_sources": [
+    { "name": "CoinTelegraph", "url": "https://cointelegraph.com/rss", "type": "rss", "category": "crypto" },
+    { "name": "Decrypt", "url": "https://decrypt.co/feed", "type": "rss", "category": "crypto" },
+    { "name": "The Block", "url": "https://www.theblock.co/rss.xml", "type": "rss", "category": "crypto" }
+  ],
+  "keywords": [
+    "TON", "The Open Network", "Telegram Gifts", "Gifts", "Stars", "Fragment",
+    "Durov", "Telegram Wallet", "NFT", "collectible gifts", "Telegram crypto",
+    "Telegram mini apps", "BTC", "ETH", "Bitcoin", "Ethereum", "crypto market",
+    "airdrop", "ETF", "DeFi", "stablecoin", "exchange", "hack", "regulation",
+    "SEC", "CFTC", "Layer 2", "L2", "zkEVM", "Solana", "Toncoin"
+  ],
+  "blocked_domains": [
+    "bit.ly", "tinyurl.com", "freeclaim", "wallet-connect",
+    "connect-wallet", "airdrop", "claim"
+  ]
+}

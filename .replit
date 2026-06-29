@@ -1,0 +1,35 @@
+modules = ["nodejs-24"]
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+integrations = ["github:1.0.0"]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+OPENAI_MODEL = "gpt-4o"
+MAX_AI_CALLS_PER_DAY = "12"
+MAX_POSTS_PER_DAY = "6"
+MAX_REWRITE_PER_POST = "3"
+MAX_TOKENS_PER_POST = "1200"
+ENABLE_COST_GUARD = "true"
+NODE_ENV = "development"
+
+[nix]
+channel = "stable-25_05"
