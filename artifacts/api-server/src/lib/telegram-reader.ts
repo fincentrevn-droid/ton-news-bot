@@ -76,7 +76,7 @@ function scoreText(text: string): number {
 
 export async function fetchTelegramChannelPosts(
   channels: { name: string; url: string }[],
-  lookbackHours = 24,
+  lookbackHours = 72,
 ): Promise<SourcePost[]> {
   const client = await getClient();
   if (!client) {
@@ -96,7 +96,8 @@ export async function fetchTelegramChannelPosts(
         .replace(/^@/, "")
         .split("/")[0]
         .trim();
-      const messages = await client.getMessages(username, { limit: 20 });
+      const messages = await client.getMessages(username, { limit: 50 });
+      logger.info({ channel: ch.name, username, count: messages.length }, "Fetched messages from Telegram channel");
 
       const posts: SourcePost[] = [];
       for (const msg of messages) {

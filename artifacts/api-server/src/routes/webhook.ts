@@ -249,8 +249,8 @@ async function generateFromSources(
   if (sourcePosts.length === 0) {
     const noSession = !process.env.TELEGRAM_STRING_SESSION;
     const msg = noSession
-      ? "⚠️ Нет свежих RSS-источников. TELEGRAM_STRING_SESSION не задан — Telegram-каналы недоступны. Пост не создан."
-      : "⚠️ Нет свежих подходящих источников. Пост не создан, чтобы не придумывать новости.";
+      ? "⚠️ TELEGRAM_STRING_SESSION не задан — Telegram-каналы недоступны. Добавьте RSS-источники или настройте сессию."
+      : "⚠️ Нет свежих источников за 72ч. Возможные причины:\n• Telegram-каналы не дали сообщений (проверь логи Railway)\n• RSS-источников нет или они не настроены\n\nПост не создан.";
     await notifyOwner(msg);
     await sendReply(msg);
     return;

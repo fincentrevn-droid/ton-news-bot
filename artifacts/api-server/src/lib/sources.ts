@@ -176,17 +176,53 @@ export async function fetchSourcePosts(): Promise<SourcePost[]> {
     fetchTelegramPosts(),
   ]);
 
-  const all: SourcePost[] = [
-    ...(rssPosts.status === "fulfilled" ? rssPosts.value : []),
-    ...(tgPosts.status === "fulfilled" ? tgPosts.value : []),
-  ];
-
   if (rssPosts.status === "rejected") {
     logger.warn({ err: rssPosts.reason }, "RSS fetch pipeline failed");
   }
   if (tgPosts.status === "rejected") {
     logger.warn({ err: tgPosts.reason }, "Telegram channel fetch pipeline failed");
   }
+
+  const tgList = tgPosts.status === "fulfilled" ? tgPosts.value : [];
+  const rssList = rssPosts.status === "fulfilled" ? rssPosts.value : [];
+
+  logger.info({ tgCount: tgList.length, rssCount: rssList.length }, "Source fetch results");
+
+  // If Telegram returned nothing and RSS is disabled, try RSS as emergency fallback
+  let emergencyRss: SourcePost[] = [];
+  if (tgList.length === 0 && process.env.ENABLE_SECONDARY_SOURCES !== "true") {
+    logger.warn("Telegram returned 0 posts — falling back to RSS as emergency source");
+    try {
+      const sources = await db
+        .select()
+        .from(sourcesTable)
+        .where(and(eq(sourcesTable.enabled, true), eq(sourcesTable.type, "rss")));
+      if (sources.length > 0) {
+        const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const results = await Promise.allSettled(
+          sources.map(async (src) => {
+            const res = await fetch(src.url, { signal: AbortSignal.timeout(12_000), headers: { "User-Agent": "TONNewsBot/1.0 RSS Reader" } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const xml = await res.text();
+            return parseItems(xml, src.name, src.url);
+          }),
+        );
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            for (const p of r.value) {
+              const score = scoreRelevance(p);
+              if (score > 0 && p.pubDate >= cutoff) emergencyRss.push({ ...p, relevanceScore: score });
+            }
+          }
+        }
+        logger.info({ count: emergencyRss.length }, "Emergency RSS fallback posts");
+      }
+    } catch (err) {
+      logger.warn({ err }, "Emergency RSS fallback failed");
+    }
+  }
+
+  const all: SourcePost[] = [...tgList, ...rssList, ...emergencyRss];
 
   if (all.length === 0) {
     logger.warn("No source posts found from any source");
