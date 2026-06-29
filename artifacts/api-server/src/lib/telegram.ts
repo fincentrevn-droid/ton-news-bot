@@ -149,34 +149,32 @@ function buildReviewCaption(
   meta?: ReviewMeta,
   maxContentChars = 3000,
 ): string {
-  const label = postType ? `[${postType.toUpperCase()}]` : "";
-  const topicLine = topic ? `📌 ${topic}\n\n` : "";
+  // ── Public post preview (exactly what will be published) ──────────────────
+  const topicLine = topic ? `📌 <i>${escapeHtml(topic)}</i>\n\n` : "";
+  const postPreview = `${topicLine}${escapeHtml(content.slice(0, maxContentChars))}`;
 
-  const sourceBlock =
-    meta?.sourceChannel || meta?.sourcePreview
-      ? [
-          `\n\n📡 <b>Источник:</b> ${meta.sourceChannel ?? "RSS"}`,
-          meta.sourceLink ? `<a href="${meta.sourceLink}">ссылка</a>` : null,
-          meta.confidence ? `· <b>${meta.confidence}</b>` : null,
-          meta.sourcePreview
-            ? `\n<i>${escapeHtml(meta.sourcePreview.slice(0, 180))}…</i>`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" ")
-      : "";
+  // ── Admin metadata (never published) ──────────────────────────────────────
+  const metaLines: string[] = [];
+  if (meta?.sourceChannel) {
+    const src = meta.sourceChannel;
+    const link = meta.sourceLink ? ` · <a href="${meta.sourceLink}">ссылка</a>` : "";
+    const conf = meta.confidence ? ` · <b>${meta.confidence}</b>` : "";
+    metaLines.push(`📡 ${escapeHtml(src)}${link}${conf}`);
+  }
+  if (meta?.sourcePreview) {
+    metaLines.push(`<i>${escapeHtml(meta.sourcePreview.slice(0, 200))}…</i>`);
+  }
+  if (safetyWarnings.length > 0) {
+    metaLines.push(`⚠️ Удалены ссылки: ${safetyWarnings.map(w => escapeHtml(w)).join(", ")}`);
+  }
+  const formatLabel = postType ? postType.toUpperCase() : "?";
+  metaLines.push(`<code>#${postId} · ${formatLabel}</code>`);
 
-  const warningBlock =
-    safetyWarnings.length > 0
-      ? `\n\n⚠️ <b>Удалены подозрительные ссылки:</b>\n${safetyWarnings.map((w) => `• ${w}`).join("\n")}`
-      : "";
+  const adminBlock = metaLines.length > 0
+    ? `\n\n<b>— — —</b>\n${metaLines.join("\n")}`
+    : `\n\n<code>#${postId}</code>`;
 
-  return (
-    `${label} <b>Черновик #${postId}</b>\n\n` +
-    `${topicLine}${escapeHtml(content.slice(0, maxContentChars))}` +
-    sourceBlock +
-    warningBlock
-  );
+  return postPreview + adminBlock;
 }
 
 export interface ReviewSendResult {
