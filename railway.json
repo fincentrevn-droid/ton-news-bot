@@ -5,7 +5,7 @@
     "buildCommand": "pnpm install --frozen-lockfile && pnpm run build:railway"
   },
   "deploy": {
-    "startCommand": "pnpm run start",
+    "startCommand": "pnpm --filter @workspace/db run push-force && pnpm run start",
     "healthcheckPath": "/api/healthz",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
