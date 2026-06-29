@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { db, sourcesTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { logger } from "./logger";
+import { fetchTelegramChannelPosts, isTelegramReaderAvailable } from "./telegram-reader";
 
 export interface SourcePost {
   title: string;
@@ -54,7 +55,6 @@ function stripHtml(html: string): string {
 function extractLink(itemXml: string): string {
   const standard = extractTag(itemXml, "link");
   if (standard) return standard.trim().replace(/\s+/g, "");
-
   const atomMatch = itemXml.match(/<link[^>]+href=["']([^"']+)["']/i);
   return atomMatch?.[1] ?? "";
 }
@@ -110,16 +110,13 @@ function scoreRelevance(post: Omit<SourcePost, "relevanceScore">): number {
   return RELEVANT_KEYWORDS.filter((kw) => text.includes(kw)).length;
 }
 
-export async function fetchSourcePosts(): Promise<SourcePost[]> {
+async function fetchRssPosts(): Promise<SourcePost[]> {
   const sources = await db
     .select()
     .from(sourcesTable)
     .where(and(eq(sourcesTable.enabled, true), eq(sourcesTable.type, "rss")));
 
-  if (sources.length === 0) {
-    logger.warn("No enabled RSS sources in database");
-    return [];
-  }
+  if (sources.length === 0) return [];
 
   const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
   const all: SourcePost[] = [];
@@ -143,25 +140,68 @@ export async function fetchSourcePosts(): Promise<SourcePost[]> {
         all.push({ ...post, relevanceScore: scoreRelevance(post) });
       }
     } else {
-      logger.warn(
-        { err: r.reason, source: sources[i].name },
-        "RSS fetch failed",
-      );
+      logger.warn({ err: r.reason, source: sources[i].name }, "RSS fetch failed");
     }
   }
 
-  const recent = all
-    .filter((p) => p.relevanceScore > 0 && p.pubDate >= cutoff)
-    .sort(
-      (a, b) =>
-        b.relevanceScore - a.relevanceScore ||
-        b.pubDate.getTime() - a.pubDate.getTime(),
+  return all.filter((p) => p.relevanceScore > 0 && p.pubDate >= cutoff);
+}
+
+async function fetchTelegramPosts(): Promise<SourcePost[]> {
+  if (!isTelegramReaderAvailable()) return [];
+
+  const channels = await db
+    .select()
+    .from(sourcesTable)
+    .where(
+      and(
+        eq(sourcesTable.enabled, true),
+        eq(sourcesTable.type, "telegram_channel"),
+      ),
     );
 
-  if (recent.length > 0) return recent.slice(0, 10);
+  if (channels.length === 0) return [];
 
-  return all
-    .filter((p) => p.relevanceScore > 0)
-    .sort((a, b) => b.relevanceScore - a.relevanceScore)
-    .slice(0, 5);
+  return fetchTelegramChannelPosts(
+    channels.map((c) => ({ name: c.name, url: c.url })),
+  );
+}
+
+export async function fetchSourcePosts(): Promise<SourcePost[]> {
+  const [rssPosts, tgPosts] = await Promise.allSettled([
+    fetchRssPosts(),
+    fetchTelegramPosts(),
+  ]);
+
+  const all: SourcePost[] = [
+    ...(rssPosts.status === "fulfilled" ? rssPosts.value : []),
+    ...(tgPosts.status === "fulfilled" ? tgPosts.value : []),
+  ];
+
+  if (rssPosts.status === "rejected") {
+    logger.warn({ err: rssPosts.reason }, "RSS fetch pipeline failed");
+  }
+  if (tgPosts.status === "rejected") {
+    logger.warn({ err: tgPosts.reason }, "Telegram channel fetch pipeline failed");
+  }
+
+  if (all.length === 0) {
+    logger.warn("No source posts found from any source");
+    return [];
+  }
+
+  // Telegram posts (primary) get a +3 relevance boost
+  const boosted = all.map((p) =>
+    p.channelUrl.startsWith("@")
+      ? { ...p, relevanceScore: p.relevanceScore + 3 }
+      : p,
+  );
+
+  const sorted = boosted.sort(
+    (a, b) =>
+      b.relevanceScore - a.relevanceScore ||
+      b.pubDate.getTime() - a.pubDate.getTime(),
+  );
+
+  return sorted.slice(0, 15);
 }
