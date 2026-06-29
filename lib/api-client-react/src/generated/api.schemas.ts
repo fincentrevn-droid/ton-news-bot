@@ -216,6 +216,20 @@ export interface Schedule {
   nextRunAt?: string | null;
   /** @nullable */
   lastRunAt?: string | null;
+  /** @nullable */
+  lastPublishedAt?: string | null;
+  postingTimezone: string;
+  postingStartTime: string;
+  postingEndTime: string;
+  nightPauseEnabled: boolean;
+  nightPauseStart: string;
+  nightPauseEnd: string;
+  minPostsPerDay: number;
+  targetPostsPerDay: number;
+  minMinutesBetweenPosts: number;
+  maxMinutesBetweenPosts: number;
+  randomDelayEnabled: boolean;
+  randomDelayMinutes: number;
 }
 
 export interface ScheduleUpdate {
@@ -223,6 +237,18 @@ export interface ScheduleUpdate {
   intervalHours?: number;
   maxPostsPerDay?: number;
   autoPublish?: boolean;
+  postingTimezone?: string;
+  postingStartTime?: string;
+  postingEndTime?: string;
+  nightPauseEnabled?: boolean;
+  nightPauseStart?: string;
+  nightPauseEnd?: string;
+  minPostsPerDay?: number;
+  targetPostsPerDay?: number;
+  minMinutesBetweenPosts?: number;
+  maxMinutesBetweenPosts?: number;
+  randomDelayEnabled?: boolean;
+  randomDelayMinutes?: number;
 }
 
 export interface TriggerResult {
