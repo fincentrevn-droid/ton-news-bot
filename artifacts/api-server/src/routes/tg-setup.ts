@@ -318,38 +318,42 @@ router.post("/setup/tg/qr-start", async (req, res): Promise<void> => {
     const state: QrState = { client, url: "", done: false, sessionString: null, expired: false, apiId, apiHash };
     qrPending.set(id, state);
 
+    // Connect first (signInUserWithQrCode requires an active connection)
+    await client.connect();
+
     // Wait for the FIRST QR code before responding so the browser gets a URL to display
     await new Promise<void>((resolveFirst) => {
       let firstQR = true;
 
-      // client.start() with qrCode callback — gramjs handles UpdateLoginToken internally
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      void (client.start as any)({
-        qrCode: async (code: { token: Buffer; expires: number }) => {
-          const tokenB64 = Buffer.from(code.token).toString("base64url");
-          state.url = `tg://login?token=${tokenB64}`;
-          logger.info({ id }, "QR token generated/refreshed");
-          if (firstQR) {
-            firstQR = false;
-            resolveFirst(); // unblock the HTTP response
-          }
+      // signInUserWithQrCode is the correct gramjs method for QR login.
+      // client.start() without phoneNumber routes to signInBot — wrong!
+      void client.signInUserWithQrCode(
+        { apiId, apiHash },
+        {
+          qrCode: async (code: { token: Buffer; expires: number }) => {
+            const tokenB64 = Buffer.from(code.token).toString("base64url");
+            state.url = `tg://login?token=${tokenB64}`;
+            logger.info({ id }, "QR token generated/refreshed");
+            if (firstQR) {
+              firstQR = false;
+              resolveFirst(); // unblock the HTTP response after first token
+            }
+          },
+          password: async () => twoFaPassword ?? "",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onError: ((err: Error): void => {
+            logger.error({ err, id }, "QR login onError");
+            state.expired = true;
+            if (firstQR) { firstQR = false; resolveFirst(); }
+          }) as any,
         },
-        // 2FA: use provided password or resolve with empty (will error if password actually needed)
-        password: async () => twoFaPassword ?? "",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onError: ((err: Error): void => {
-          logger.error({ err, id }, "QR login error");
-          state.expired = true;
-          if (firstQR) { firstQR = false; resolveFirst(); }
-        }) as any,
-      }).then(() => {
-        // start() resolved — user is now logged in
+      ).then(() => {
         state.done = true;
         state.sessionString = String(client.session.save());
-        logger.info({ id }, "QR login success");
+        logger.info({ id }, "QR login success — session saved");
         void client.disconnect().catch(() => undefined);
       }).catch((err: Error) => {
-        logger.error({ err, id }, "QR login start() failed");
+        logger.error({ err, id }, "QR signInUserWithQrCode failed");
         state.expired = true;
         if (firstQR) { firstQR = false; resolveFirst(); }
       });
