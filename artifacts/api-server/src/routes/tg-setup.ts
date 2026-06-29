@@ -19,6 +19,9 @@
  * Response contains sessionString — save as TELEGRAM_STRING_SESSION in Railway Variables.
  */
 import { Router } from "express";
+import { TelegramClient, Api } from "telegram";
+import { StringSession } from "telegram/sessions/index.js";
+import { computeCheck } from "telegram/Password.js";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -176,9 +179,6 @@ router.post("/setup/tg/send-code", async (req, res): Promise<void> => {
   }
 
   try {
-    const { TelegramClient } = await import("telegram");
-    const { StringSession } = await import("telegram/sessions/index.js");
-
     const client = new TelegramClient(new StringSession(""), apiId, apiHash, {
       connectionRetries: 3,
     });
@@ -223,7 +223,6 @@ router.post("/setup/tg/sign-in", async (req, res): Promise<void> => {
   }
 
   try {
-    const { TelegramClient, Api } = await import("telegram");
     const client = entry.client as InstanceType<typeof TelegramClient>;
 
     try {
@@ -245,7 +244,6 @@ router.post("/setup/tg/sign-in", async (req, res): Promise<void> => {
           });
           return;
         }
-        const { computeCheck } = await import("telegram/Password.js");
         const pwdInfo = await client.invoke(new Api.account.GetPassword());
         await client.invoke(
           new Api.auth.CheckPassword({
