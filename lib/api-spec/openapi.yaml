@@ -535,7 +535,7 @@ components:
 
     Schedule:
       type: object
-      required: [id, enabled, intervalHours, maxPostsPerDay, autoPublish]
+      required: [id, enabled, intervalHours, maxPostsPerDay, autoPublish, postingTimezone, postingStartTime, postingEndTime, nightPauseEnabled, nightPauseStart, nightPauseEnd, minPostsPerDay, targetPostsPerDay, minMinutesBetweenPosts, maxMinutesBetweenPosts, randomDelayEnabled, randomDelayMinutes]
       properties:
         id:
           type: integer
@@ -551,6 +551,32 @@ components:
           type: ["string", "null"]
         lastRunAt:
           type: ["string", "null"]
+        lastPublishedAt:
+          type: ["string", "null"]
+        postingTimezone:
+          type: string
+        postingStartTime:
+          type: string
+        postingEndTime:
+          type: string
+        nightPauseEnabled:
+          type: boolean
+        nightPauseStart:
+          type: string
+        nightPauseEnd:
+          type: string
+        minPostsPerDay:
+          type: integer
+        targetPostsPerDay:
+          type: integer
+        minMinutesBetweenPosts:
+          type: integer
+        maxMinutesBetweenPosts:
+          type: integer
+        randomDelayEnabled:
+          type: boolean
+        randomDelayMinutes:
+          type: integer
 
     ScheduleUpdate:
       type: object
@@ -563,6 +589,30 @@ components:
           type: integer
         autoPublish:
           type: boolean
+        postingTimezone:
+          type: string
+        postingStartTime:
+          type: string
+        postingEndTime:
+          type: string
+        nightPauseEnabled:
+          type: boolean
+        nightPauseStart:
+          type: string
+        nightPauseEnd:
+          type: string
+        minPostsPerDay:
+          type: integer
+        targetPostsPerDay:
+          type: integer
+        minMinutesBetweenPosts:
+          type: integer
+        maxMinutesBetweenPosts:
+          type: integer
+        randomDelayEnabled:
+          type: boolean
+        randomDelayMinutes:
+          type: integer
 
     TriggerResult:
       type: object
