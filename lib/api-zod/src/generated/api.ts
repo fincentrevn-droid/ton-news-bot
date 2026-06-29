@@ -29,6 +29,7 @@ export const ListPostsQueryParams = zod.object({
 })
 
 export const listPostsResponseAiCallsUsedDefault = 0;
+export const listPostsResponseRewriteAttemptsDefault = 0;
 
 export const ListPostsResponseItem = zod.object({
   "id": zod.number(),
@@ -45,7 +46,12 @@ export const ListPostsResponseItem = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(listPostsResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(listPostsResponseRewriteAttemptsDefault)
 })
 export const ListPostsResponse = zod.array(ListPostsResponseItem)
 
@@ -63,6 +69,7 @@ export const CreatePostBody = zod.object({
 })
 
 export const createPostResponseAiCallsUsedDefault = 0;
+export const createPostResponseRewriteAttemptsDefault = 0;
 
 export const CreatePostResponse = zod.object({
   "id": zod.number(),
@@ -79,7 +86,12 @@ export const CreatePostResponse = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(createPostResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(createPostResponseRewriteAttemptsDefault)
 })
 
 
@@ -91,6 +103,7 @@ export const GetPostParams = zod.object({
 })
 
 export const getPostResponseAiCallsUsedDefault = 0;
+export const getPostResponseRewriteAttemptsDefault = 0;
 
 export const GetPostResponse = zod.object({
   "id": zod.number(),
@@ -107,7 +120,12 @@ export const GetPostResponse = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(getPostResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(getPostResponseRewriteAttemptsDefault)
 })
 
 
@@ -126,6 +144,7 @@ export const UpdatePostBody = zod.object({
 })
 
 export const updatePostResponseAiCallsUsedDefault = 0;
+export const updatePostResponseRewriteAttemptsDefault = 0;
 
 export const UpdatePostResponse = zod.object({
   "id": zod.number(),
@@ -142,7 +161,12 @@ export const UpdatePostResponse = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(updatePostResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(updatePostResponseRewriteAttemptsDefault)
 })
 
 
@@ -164,6 +188,7 @@ export const PublishPostParams = zod.object({
 })
 
 export const publishPostResponseAiCallsUsedDefault = 0;
+export const publishPostResponseRewriteAttemptsDefault = 0;
 
 export const PublishPostResponse = zod.object({
   "id": zod.number(),
@@ -180,7 +205,12 @@ export const PublishPostResponse = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(publishPostResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(publishPostResponseRewriteAttemptsDefault)
 })
 
 
@@ -192,6 +222,7 @@ export const RegeneratePostParams = zod.object({
 })
 
 export const regeneratePostResponseAiCallsUsedDefault = 0;
+export const regeneratePostResponseRewriteAttemptsDefault = 0;
 
 export const RegeneratePostResponse = zod.object({
   "id": zod.number(),
@@ -208,7 +239,12 @@ export const RegeneratePostResponse = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(regeneratePostResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(regeneratePostResponseRewriteAttemptsDefault)
 })
 
 
@@ -223,6 +259,7 @@ export const GeneratePostBody = zod.object({
 })
 
 export const generatePostResponseAiCallsUsedDefault = 0;
+export const generatePostResponseRewriteAttemptsDefault = 0;
 
 export const GeneratePostResponse = zod.object({
   "id": zod.number(),
@@ -239,7 +276,12 @@ export const GeneratePostResponse = zod.object({
   "scheduledAt": zod.string().nullish(),
   "aiCallsUsed": zod.number().default(generatePostResponseAiCallsUsedDefault),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
+  "updatedAt": zod.string().optional(),
+  "qualityScore": zod.number().nullish(),
+  "qualityCheckPassed": zod.boolean().nullish(),
+  "qualityIssues": zod.string().nullish(),
+  "safeForAutopublish": zod.boolean().nullish(),
+  "rewriteAttempts": zod.number().default(generatePostResponseRewriteAttemptsDefault)
 })
 
 
