@@ -2,7 +2,7 @@ import { Router } from "express";
 import { eq, sql, and, gte } from "drizzle-orm";
 import { db, postsTable, sourcesTable } from "@workspace/db";
 import { generatePostContent, incrementAiUsage, getOrCreateTodayUsage, getSettings } from "../lib/openai";
-import { sendTelegramMessage, sendReviewMessage, answerCallbackQuery, notifyOwner } from "../lib/telegram";
+import { sendTelegramMessage, sendPhotoPost, sendReviewMessage, answerCallbackQuery, notifyOwner } from "../lib/telegram";
 import { fetchSourcePosts } from "../lib/sources";
 import { checkSafety, cleanContent } from "../lib/safety";
 import { logger } from "../lib/logger";
@@ -73,11 +73,27 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
       return;
     }
     try {
-      const messageId = await sendTelegramMessage(post.content);
+      let messageId: number;
+      let newFileId: string | null = post.mediaFileId ?? null;
+
+      if (post.hasMedia && post.mediaFileId) {
+        // Reuse stored file_id — no re-upload needed
+        const result = await sendPhotoPost(post.mediaFileId, post.content);
+        messageId = result.messageId;
+        newFileId = result.fileId || post.mediaFileId;
+      } else {
+        messageId = await sendTelegramMessage(post.content);
+      }
+
       await db.update(postsTable)
-        .set({ status: "published", telegramMessageId: messageId, publishedAt: new Date() })
+        .set({
+          status: "published",
+          telegramMessageId: messageId,
+          publishedAt: new Date(),
+          ...(newFileId ? { mediaFileId: newFileId } : {}),
+        })
         .where(eq(postsTable.id, postId));
-      await answerCallbackQuery(query.id, "✅ Опубликован в канал!");
+      await answerCallbackQuery(query.id, post.hasMedia ? "✅ Опубликован с фото!" : "✅ Опубликован в канал!");
     } catch (err) {
       logger.error({ err }, "Publish via button failed");
       await answerCallbackQuery(query.id, "❌ Ошибка при публикации");
@@ -109,7 +125,10 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
         })
         .where(eq(postsTable.id, postId));
 
-      const reviewMsgId = await sendReviewMessage(
+      // If post had media, reuse existing file_id in the new review
+      const photoSource = post.hasMedia && post.mediaFileId ? post.mediaFileId : undefined;
+
+      const { messageId: reviewMsgId, fileId: newFileId } = await sendReviewMessage(
         postId,
         cleanedContent,
         safety.warnings,
@@ -121,11 +140,14 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
           sourceLink: post.sourceLink ?? undefined,
           confidence,
         },
+        photoSource,
       );
-      if (reviewMsgId) {
-        await db.update(postsTable)
-          .set({ reviewMessageId: reviewMsgId })
-          .where(eq(postsTable.id, postId));
+
+      const updateData: Partial<typeof postsTable.$inferSelect> = {};
+      if (reviewMsgId) updateData.reviewMessageId = reviewMsgId;
+      if (newFileId) updateData.mediaFileId = newFileId;
+      if (Object.keys(updateData).length > 0) {
+        await db.update(postsTable).set(updateData).where(eq(postsTable.id, postId));
       }
     } catch (err) {
       logger.error({ err }, "Rewrite via button failed");
@@ -279,12 +301,13 @@ async function generateFromSources(
     candidate = pick;
 
     logger.info(
-      { attempt, channel: candidate.channel, score: candidate.relevanceScore, hash: candidate.textHash },
+      { attempt, channel: candidate.channel, score: candidate.relevanceScore, hash: candidate.textHash, hasMedia: candidate.mediaType === "photo" },
       "Trying source post for generation",
     );
 
     if (attempt === 0) {
-      await sendReply(`📰 Источник: <b>${candidate.channel}</b>\n\n🤖 Генерирую пост...`);
+      const mediaNote = candidate.mediaType === "photo" ? " 📷" : "";
+      await sendReply(`📰 Источник: <b>${candidate.channel}</b>${mediaNote}\n\n🤖 Генерирую пост...`);
     }
 
     try {
@@ -313,12 +336,24 @@ async function generateFromSources(
   const cleanedContent = cleanContent(content, safety);
   await incrementAiUsage("post");
 
+  const hasMedia = candidate.mediaType === "photo" && Boolean(candidate.mediaBuffer);
+  const sourceType = candidate.channelUrl.startsWith("@") ? "telegram_channel" : "rss";
+
+  // ── Send review (with photo if available) ─────────────────────────────────
+  const reviewMeta = {
+    sourceChannel: candidate.channel,
+    sourcePreview: candidate.preview,
+    sourceLink: candidate.link || undefined,
+    confidence,
+  };
+
+  // Insert post first to get the ID
   const [post] = await db.insert(postsTable).values({
     content: cleanedContent,
     postType,
     safetyStatus: safety.status,
     aiCallsUsed: 1,
-    sourceType: "rss",
+    sourceType,
     sourceUrl: candidate.link || null,
     sourceChannel: candidate.channel,
     sourcePostId: candidate.textHash,
@@ -328,29 +363,31 @@ async function generateFromSources(
     generatedFromSource: true,
     sourcePreview: candidate.preview,
     confidence,
+    hasMedia,
+    mediaType: candidate.mediaType ?? null,
+    mediaDownloadStatus: hasMedia ? "ok" : null,
   }).returning();
 
-  const reviewMsgId = await sendReviewMessage(
+  const { messageId: reviewMsgId, fileId } = await sendReviewMessage(
     post.id,
     cleanedContent,
     safety.warnings,
     postType,
     undefined,
-    {
-      sourceChannel: candidate.channel,
-      sourcePreview: candidate.preview,
-      sourceLink: candidate.link || undefined,
-      confidence,
-    },
+    reviewMeta,
+    hasMedia ? candidate.mediaBuffer : undefined,
   );
 
-  if (reviewMsgId) {
-    await db.update(postsTable)
-      .set({ reviewMessageId: reviewMsgId })
-      .where(eq(postsTable.id, post.id));
+  // Update post with review message ID and file_id (if photo was uploaded)
+  const updateFields: Record<string, unknown> = {};
+  if (reviewMsgId) updateFields.reviewMessageId = reviewMsgId;
+  if (fileId) updateFields.mediaFileId = fileId;
+  if (Object.keys(updateFields).length > 0) {
+    await db.update(postsTable).set(updateFields).where(eq(postsTable.id, post.id));
   }
 
-  await sendReply(`✅ Пост #${post.id} из источника "${candidate.channel}" отправлен на ревью.`);
+  const photoNote = hasMedia ? " с фото 📷" : "";
+  await sendReply(`✅ Пост #${post.id} из источника "<b>${candidate.channel}</b>"${photoNote} отправлен на ревью.`);
 }
 
 export default router;

@@ -27,6 +27,12 @@ export const postsTable = pgTable("posts", {
   generatedFromSource: boolean("generated_from_source").notNull().default(false),
   sourcePreview: text("source_preview"),
   confidence: text("confidence"),
+
+  // Media from source post
+  hasMedia: boolean("has_media").notNull().default(false),
+  mediaType: text("media_type"),             // 'photo' | null
+  mediaFileId: text("media_file_id"),        // Telegram file_id after first upload (for reuse)
+  mediaDownloadStatus: text("media_download_status"), // 'ok' | 'failed' | null
 });
 
 export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true, createdAt: true, updatedAt: true });

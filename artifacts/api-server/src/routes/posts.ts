@@ -113,7 +113,7 @@ router.post("/posts/generate", async (req, res): Promise<void> => {
     const settings = await getSettings();
 
     if (settings.postingRequiresApproval && !settings.autoPublish) {
-      const reviewMsgId = await sendReviewMessage(
+      const { messageId: reviewMsgId } = await sendReviewMessage(
         post.id,
         cleanedContent,
         safety.warnings,
@@ -288,7 +288,7 @@ router.post("/posts/:id/regenerate", async (req, res): Promise<void> => {
 
     const settings = await getSettings();
     if (settings.postingRequiresApproval && !settings.autoPublish) {
-      const reviewMsgId = await sendReviewMessage(
+      const { messageId: reviewMsgId } = await sendReviewMessage(
         updated.id,
         cleanedContent,
         safety.warnings,

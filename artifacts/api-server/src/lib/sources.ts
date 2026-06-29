@@ -15,6 +15,9 @@ export interface SourcePost {
   textHash: string;
   preview: string;
   relevanceScore: number;
+  // Media extracted from source (Telegram posts only)
+  mediaType?: "photo" | "none";
+  mediaBuffer?: Buffer;
 }
 
 const RELEVANT_KEYWORDS = [

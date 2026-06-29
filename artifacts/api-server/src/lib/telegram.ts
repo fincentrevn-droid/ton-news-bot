@@ -31,13 +31,35 @@ async function telegramPost(token: string, method: string, body: unknown): Promi
   return res.json();
 }
 
+// ─── Multipart helper (for photo uploads) ───────────────────────────────────
+
+async function telegramMultipart(token: string, method: string, fields: Record<string, string>, photoBuffer: Buffer): Promise<unknown> {
+  const form = new FormData();
+  for (const [key, val] of Object.entries(fields)) {
+    form.append(key, val);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  form.append("photo", new Blob([photoBuffer as any], { type: "image/jpeg" }), "photo.jpg");
+  const res = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, { method: "POST", body: form });
+  return res.json();
+}
+
+// Extract largest file_id from sendPhoto result
+function extractFileId(result: unknown): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const photos = (result as any)?.photo as Array<{ file_id: string }> | undefined;
+  return photos?.at(-1)?.file_id ?? "";
+}
+
+// ─── Text publish ────────────────────────────────────────────────────────────
+
 export async function sendTelegramMessage(text: string): Promise<number> {
   const token = getBotToken();
   const chatId = getChannelId();
 
   const data = await telegramPost(token, "sendMessage", {
     chat_id: chatId,
-    text,
+    text: escapeHtml(text),
     parse_mode: "HTML",
   }) as { ok: boolean; result?: { message_id: number }; description?: string };
 
@@ -46,9 +68,60 @@ export async function sendTelegramMessage(text: string): Promise<number> {
     throw new Error(`Telegram error: ${data.description}`);
   }
 
-  logger.info({ messageId: data.result?.message_id }, "Post published to Telegram");
+  logger.info({ messageId: data.result?.message_id }, "Post published to Telegram (text)");
   return data.result!.message_id;
 }
+
+// ─── Photo publish ───────────────────────────────────────────────────────────
+
+export interface PhotoPublishResult {
+  messageId: number;
+  fileId: string;
+}
+
+/**
+ * Publish a photo post to the channel.
+ * @param photoSource  Buffer = new upload; string = reuse existing file_id
+ * @param caption      Post content (plain text — will be HTML-escaped, max 1024 chars)
+ */
+export async function sendPhotoPost(
+  photoSource: Buffer | string,
+  caption: string,
+): Promise<PhotoPublishResult> {
+  const token = getBotToken();
+  const chatId = getChannelId();
+  const safeCaption = escapeHtml(caption).slice(0, 1024);
+
+  let data: { ok: boolean; result?: unknown; description?: string };
+
+  if (typeof photoSource === "string") {
+    data = await telegramPost(token, "sendPhoto", {
+      chat_id: chatId,
+      photo: photoSource,
+      caption: safeCaption,
+      parse_mode: "HTML",
+    }) as typeof data;
+  } else {
+    data = await telegramMultipart(token, "sendPhoto", {
+      chat_id: chatId,
+      caption: safeCaption,
+      parse_mode: "HTML",
+    }, photoSource) as typeof data;
+  }
+
+  if (!data.ok) {
+    logger.error({ description: data.description }, "Telegram sendPhoto failed");
+    throw new Error(`Telegram sendPhoto error: ${data.description}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messageId = (data.result as any)?.message_id as number;
+  const fileId = extractFileId(data.result);
+  logger.info({ messageId, fileId: fileId.slice(0, 20) }, "Post published to Telegram (photo)");
+  return { messageId, fileId };
+}
+
+// ─── Review message ──────────────────────────────────────────────────────────
 
 export interface ReviewMeta {
   sourceChannel?: string;
@@ -57,21 +130,25 @@ export interface ReviewMeta {
   confidence?: string;
 }
 
-export async function sendReviewMessage(
+const REVIEW_KEYBOARD = (postId: number) => ({
+  inline_keyboard: [
+    [
+      { text: "✅ Опубликовать", callback_data: `publish:${postId}` },
+      { text: "🔁 Переписать", callback_data: `rewrite:${postId}` },
+      { text: "❌ Пропустить", callback_data: `skip:${postId}` },
+    ],
+  ],
+});
+
+function buildReviewCaption(
   postId: number,
   content: string,
-  safetyWarnings: string[] = [],
+  safetyWarnings: string[],
   postType?: string,
   topic?: string,
   meta?: ReviewMeta,
-): Promise<number | null> {
-  const token = getBotToken();
-  const chatId = getReviewChatId();
-  if (!chatId) {
-    logger.warn("No REVIEW_CHAT_ID or OWNER_TELEGRAM_ID set — skipping Telegram review");
-    return null;
-  }
-
+  maxContentChars = 3000,
+): string {
   const label = postType ? `[${postType.toUpperCase()}]` : "";
   const topicLine = topic ? `📌 ${topic}\n\n` : "";
 
@@ -80,9 +157,9 @@ export async function sendReviewMessage(
       ? [
           `\n\n📡 <b>Источник:</b> ${meta.sourceChannel ?? "RSS"}`,
           meta.sourceLink ? `<a href="${meta.sourceLink}">ссылка</a>` : null,
-          meta.confidence ? `· достоверность: <b>${meta.confidence}</b>` : null,
+          meta.confidence ? `· <b>${meta.confidence}</b>` : null,
           meta.sourcePreview
-            ? `\n<i>${escapeHtml(meta.sourcePreview.slice(0, 200))}…</i>`
+            ? `\n<i>${escapeHtml(meta.sourcePreview.slice(0, 180))}…</i>`
             : null,
         ]
           .filter(Boolean)
@@ -94,35 +171,98 @@ export async function sendReviewMessage(
       ? `\n\n⚠️ <b>Удалены подозрительные ссылки:</b>\n${safetyWarnings.map((w) => `• ${w}`).join("\n")}`
       : "";
 
-  const text =
-    `${label} <b>Новый черновик #${postId}</b>\n\n` +
-    `${topicLine}${escapeHtml(content)}` +
+  return (
+    `${label} <b>Черновик #${postId}</b>\n\n` +
+    `${topicLine}${escapeHtml(content.slice(0, maxContentChars))}` +
     sourceBlock +
-    warningBlock;
+    warningBlock
+  );
+}
+
+export interface ReviewSendResult {
+  messageId: number | null;
+  fileId: string | null;
+}
+
+/**
+ * Send a review message (text or photo).
+ * Returns messageId and, if a new photo was uploaded, the Telegram file_id for reuse.
+ */
+export async function sendReviewMessage(
+  postId: number,
+  content: string,
+  safetyWarnings: string[] = [],
+  postType?: string,
+  topic?: string,
+  meta?: ReviewMeta,
+  photoSource?: Buffer | string,   // Buffer = new upload, string = reuse file_id
+): Promise<ReviewSendResult> {
+  const token = getBotToken();
+  const chatId = getReviewChatId();
+  if (!chatId) {
+    logger.warn("No REVIEW_CHAT_ID or OWNER_TELEGRAM_ID set — skipping Telegram review");
+    return { messageId: null, fileId: null };
+  }
+
+  const replyMarkup = REVIEW_KEYBOARD(postId);
+
+  // ── With photo ──────────────────────────────────────────────────────────────
+  if (photoSource) {
+    // Caption is limited to 1024 chars in sendPhoto
+    const captionText = buildReviewCaption(postId, content, safetyWarnings, postType, topic, meta, 700);
+    const safeCaption = captionText.slice(0, 1024);
+
+    let data: { ok: boolean; result?: unknown; description?: string };
+
+    if (typeof photoSource === "string") {
+      data = await telegramPost(token, "sendPhoto", {
+        chat_id: chatId,
+        photo: photoSource,
+        caption: safeCaption,
+        parse_mode: "HTML",
+        reply_markup: replyMarkup,
+      }) as typeof data;
+    } else {
+      data = await telegramMultipart(token, "sendPhoto", {
+        chat_id: chatId,
+        caption: safeCaption,
+        parse_mode: "HTML",
+        reply_markup: JSON.stringify(replyMarkup),
+      }, photoSource) as typeof data;
+    }
+
+    if (!data.ok) {
+      logger.warn({ description: data.description }, "Photo review failed — falling back to text");
+      // Fall through to text review below
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const messageId = (data.result as any)?.message_id as number;
+      const fileId = extractFileId(data.result);
+      logger.info({ postId, messageId, hasFileId: Boolean(fileId) }, "Photo review message sent");
+      return { messageId, fileId: fileId || null };
+    }
+  }
+
+  // ── Text only ───────────────────────────────────────────────────────────────
+  const text = buildReviewCaption(postId, content, safetyWarnings, postType, topic, meta);
 
   const data = await telegramPost(token, "sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ Опубликовать", callback_data: `publish:${postId}` },
-          { text: "🔁 Переписать", callback_data: `rewrite:${postId}` },
-          { text: "❌ Пропустить", callback_data: `skip:${postId}` },
-        ],
-      ],
-    },
+    reply_markup: replyMarkup,
   }) as { ok: boolean; result?: { message_id: number }; description?: string };
 
   if (!data.ok) {
     logger.error({ description: data.description }, "Failed to send review message");
-    return null;
+    return { messageId: null, fileId: null };
   }
 
-  logger.info({ postId, reviewMessageId: data.result?.message_id }, "Review message sent");
-  return data.result?.message_id ?? null;
+  logger.info({ postId, reviewMessageId: data.result?.message_id }, "Review message sent (text)");
+  return { messageId: data.result?.message_id ?? null, fileId: null };
 }
+
+// ─── Edit review message ─────────────────────────────────────────────────────
 
 export async function editReviewMessage(
   chatId: string,
@@ -137,6 +277,8 @@ export async function editReviewMessage(
     parse_mode: "HTML",
   });
 }
+
+// ─── Misc ────────────────────────────────────────────────────────────────────
 
 export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
   const token = getBotToken();
@@ -191,7 +333,7 @@ export async function setWebhook(webhookUrl: string): Promise<void> {
   }
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

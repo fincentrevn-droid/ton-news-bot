@@ -43,7 +43,7 @@ async function getClient(): Promise<import("telegram").TelegramClient | null> {
     const session = new (StringSession as new (s?: string) => unknown)(process.env.TELEGRAM_STRING_SESSION!);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = new TelegramClient(session as any, apiId, apiHash, {
-      connectionRetries: 3, autoReconnect: true, maxConcurrentDownloads: 1,
+      connectionRetries: 3, autoReconnect: true, maxConcurrentDownloads: 2,
     });
 
     await client.connect();
@@ -74,6 +74,33 @@ function scoreText(text: string): number {
   return RELEVANT_KEYWORDS.filter((kw) => lower.includes(kw)).length;
 }
 
+function hasPhotoMedia(msg: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const media = (msg as any)?.media;
+  if (!media) return false;
+  const cls = media.className as string | undefined;
+  return cls === "MessageMediaPhoto" || Boolean(media.photo);
+}
+
+async function downloadPhoto(
+  client: import("telegram").TelegramClient,
+  msg: unknown,
+  channelName: string,
+): Promise<Buffer | undefined> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await client.downloadMedia(msg as any, {});
+    if (!result) return undefined;
+    if (Buffer.isBuffer(result)) return result;
+    // gramjs may return Uint8Array on some platforms
+    if (result && typeof result === "object" && "length" in result) return Buffer.from(result as Uint8Array);
+    return undefined;
+  } catch (err) {
+    logger.warn({ err, channel: channelName }, "Failed to download photo from Telegram message");
+    return undefined;
+  }
+}
+
 export async function fetchTelegramChannelPosts(
   channels: { name: string; url: string }[],
   lookbackHours = 72,
@@ -101,21 +128,39 @@ export async function fetchTelegramChannelPosts(
 
       const posts: SourcePost[] = [];
       for (const msg of messages) {
-        const text = (msg as { message?: string }).message;
-        if (!text || text.trim().length < 30) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const msgAny = msg as any;
+        const text = (msgAny.message ?? "") as string;
+        // Accept posts with photo even if text is short (caption may be brief)
+        const hasPhoto = hasPhotoMedia(msg);
+        if (!text || (text.trim().length < 30 && !hasPhoto)) continue;
 
-        const date = new Date(((msg as { date?: number }).date ?? 0) * 1000);
+        const date = new Date((msgAny.date ?? 0) * 1000);
         if (date < cutoff) continue;
 
         const score = scoreText(text);
+        // Skip completely irrelevant text-only posts, but keep photo posts
+        if (score === 0 && !hasPhoto) continue;
+
         const fullText = text.slice(0, 1200);
         const textHash = createHash("sha256")
-          .update(fullText.slice(0, 500))
+          .update((fullText || username + msgAny.id).slice(0, 500))
           .digest("hex")
           .slice(0, 16);
 
-        const msgId = (msg as { id?: number }).id ?? 0;
+        const msgId = (msgAny.id ?? 0) as number;
         const link = `https://t.me/${username}/${msgId}`;
+
+        // Download photo if present
+        let mediaBuffer: Buffer | undefined;
+        let mediaType: "photo" | "none" = "none";
+        if (hasPhoto) {
+          mediaBuffer = await downloadPhoto(client, msg, ch.name);
+          if (mediaBuffer) {
+            mediaType = "photo";
+            logger.info({ channel: ch.name, msgId, bytes: mediaBuffer.length }, "Downloaded photo from Telegram post");
+          }
+        }
 
         posts.push({
           title: text.split("\n")[0].slice(0, 100),
@@ -128,6 +173,8 @@ export async function fetchTelegramChannelPosts(
           textHash,
           preview: fullText.slice(0, 450),
           relevanceScore: score,
+          mediaType,
+          mediaBuffer,
         });
       }
       return posts;
@@ -143,7 +190,7 @@ export async function fetchTelegramChannelPosts(
     }
   }
 
-  return all.filter((p) => p.relevanceScore > 0);
+  return all.filter((p) => p.relevanceScore > 0 || p.mediaType === "photo");
 }
 
 export async function disconnectTelegramClient(): Promise<void> {
