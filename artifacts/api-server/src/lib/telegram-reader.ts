@@ -1,6 +1,16 @@
 import { createHash } from "crypto";
+import { createRequire } from "node:module";
 import { logger } from "./logger";
 import type { SourcePost } from "./sources";
+
+// Load gramjs as CJS via require — avoids ESM/CJS interop issues with esbuild
+const _req = createRequire(import.meta.url);
+
+function loadGram() {
+  const gram = _req("telegram") as typeof import("telegram");
+  const sessions = _req("telegram/sessions") as { StringSession: new (s?: string) => unknown };
+  return { TelegramClient: gram.TelegramClient, StringSession: sessions.StringSession };
+}
 
 // Gramjs client singleton — connects once, stays alive
 let clientInstance: unknown = null;
@@ -26,17 +36,14 @@ async function getClient(): Promise<import("telegram").TelegramClient | null> {
   }
 
   try {
-    const { TelegramClient } = await import("telegram");
-    const { StringSession } = await import("telegram/sessions/index.js");
+    const { TelegramClient, StringSession } = loadGram();
 
     const apiId = parseInt(process.env.TELEGRAM_API_ID!, 10);
     const apiHash = process.env.TELEGRAM_API_HASH!;
-    const session = new StringSession(process.env.TELEGRAM_STRING_SESSION!);
-
-    const client = new TelegramClient(session, apiId, apiHash, {
-      connectionRetries: 3,
-      autoReconnect: true,
-      maxConcurrentDownloads: 1,
+    const session = new (StringSession as new (s?: string) => unknown)(process.env.TELEGRAM_STRING_SESSION!);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new TelegramClient(session as any, apiId, apiHash, {
+      connectionRetries: 3, autoReconnect: true, maxConcurrentDownloads: 1,
     });
 
     await client.connect();
@@ -83,9 +90,7 @@ export async function fetchTelegramChannelPosts(
   const results = await Promise.allSettled(
     channels.map(async (ch) => {
       const username = ch.url.replace(/^@/, "");
-      const messages = await client.getMessages(username, {
-        limit: 20,
-      });
+      const messages = await client.getMessages(username, { limit: 20 });
 
       const posts: SourcePost[] = [];
       for (const msg of messages) {

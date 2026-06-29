@@ -3,26 +3,23 @@
  * Protected by TELEGRAM_SETUP_SECRET env var.
  * Remove TELEGRAM_SETUP_SECRET from Railway Variables after use.
  *
- * Step 1 — send code:
- *   curl -X POST https://your-app.up.railway.app/api/setup/tg/send-code \
- *     -H "Content-Type: application/json" \
- *     -d '{"secret":"YOUR_SECRET","phone":"+79001234567"}'
- *
- * Step 2 — sign in (no 2FA):
- *   curl -X POST https://your-app.up.railway.app/api/setup/tg/sign-in \
- *     -H "Content-Type: application/json" \
- *     -d '{"secret":"YOUR_SECRET","phone":"+79001234567","phoneCodeHash":"HASH","code":"12345"}'
- *
- * Step 2 — sign in (with 2FA password):
- *   Add "password":"your2FApassword" to the JSON above.
- *
- * Response contains sessionString — save as TELEGRAM_STRING_SESSION in Railway Variables.
+ * Step 1 — open browser: GET /api/setup/tg
+ * Step 2 — fill form (secret + phone) → code arrives in Telegram app
+ * Step 3 — enter code → get sessionString → save as TELEGRAM_STRING_SESSION in Railway
  */
 import { Router } from "express";
-import { TelegramClient, Api } from "telegram";
-import { StringSession } from "telegram/sessions/index.js";
-import { computeCheck } from "telegram/Password.js";
+import { createRequire } from "node:module";
 import { logger } from "../lib/logger";
+
+// Load gramjs via require so it works correctly as a CJS module at runtime
+const _req = createRequire(import.meta.url);
+
+function loadGram() {
+  const gram = _req("telegram") as typeof import("telegram");
+  const sessions = _req("telegram/sessions") as { StringSession: (new (s?: string) => unknown) };
+  const pwd = _req("telegram/Password") as { computeCheck: typeof import("telegram/Password").computeCheck };
+  return { TelegramClient: gram.TelegramClient, Api: gram.Api, StringSession: sessions.StringSession, computeCheck: pwd.computeCheck };
+}
 
 const router = Router();
 
@@ -32,6 +29,24 @@ interface PendingAuth {
 }
 
 const pending = new Map<string, PendingAuth>();
+
+function requireSecret(
+  body: Record<string, unknown>,
+  res: Parameters<Parameters<typeof router.post>[1]>[1],
+): boolean {
+  const secret = process.env.TELEGRAM_SETUP_SECRET;
+  if (!secret) {
+    res.status(503).json({
+      error: "TELEGRAM_SETUP_SECRET not set. Add it to Railway Variables first, then call this endpoint.",
+    });
+    return false;
+  }
+  if (body.secret !== secret) {
+    res.status(401).json({ error: "Wrong secret" });
+    return false;
+  }
+  return true;
+}
 
 // ── HTML setup page ──────────────────────────────────────────────────────────
 router.get("/setup/tg", (_req, res): void => {
@@ -61,7 +76,7 @@ router.get("/setup/tg", (_req, res): void => {
   button:hover{background:#1d4ed8}
   .box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-top:12px}
   .step{font-size:.8rem;font-weight:700;text-transform:uppercase;color:#2563eb;letter-spacing:.05em;margin-bottom:8px}
-  #result{margin-top:20px;white-space:pre-wrap;background:#f4f4f4;padding:14px;border-radius:8px;font-size:.85rem;display:none}
+  #result{margin-top:20px;white-space:pre-wrap;background:#f4f4f4;padding:14px;border-radius:8px;font-size:.85rem;display:none;word-break:break-all}
   .err{color:#dc2626}
   .ok{color:#16a34a}
 </style>
@@ -129,7 +144,7 @@ async function signIn() {
     });
     const d = await r.json();
     if (d.ok) {
-      showResult('✅ Готово! Скопируй значение TELEGRAM_STRING_SESSION:\\n\\n' + d.sessionString + '\\n\\nДобавь в Railway Variables, потом удали TELEGRAM_SETUP_SECRET и задеплой.', true);
+      showResult('✅ Готово!\\n\\nТвой TELEGRAM_STRING_SESSION:\\n\\n' + d.sessionString + '\\n\\nСкопируй и добавь в Railway Variables.\\nПотом удали TELEGRAM_SETUP_SECRET и задеплой.', true);
     } else {
       showResult('❌ ' + (d.error || JSON.stringify(d)), false);
     }
@@ -147,24 +162,7 @@ function showResult(msg, ok) {
 </html>`);
 });
 
-function requireSecret(
-  body: Record<string, unknown>,
-  res: Parameters<Parameters<typeof router.post>[1]>[1],
-): boolean {
-  const secret = process.env.TELEGRAM_SETUP_SECRET;
-  if (!secret) {
-    res.status(503).json({
-      error: "TELEGRAM_SETUP_SECRET not set. Add it to Railway Variables first, then call this endpoint.",
-    });
-    return false;
-  }
-  if (body.secret !== secret) {
-    res.status(401).json({ error: "Wrong secret" });
-    return false;
-  }
-  return true;
-}
-
+// ── API endpoints ─────────────────────────────────────────────────────────────
 router.post("/setup/tg/send-code", async (req, res): Promise<void> => {
   if (!requireSecret(req.body as Record<string, unknown>, res)) return;
 
@@ -179,9 +177,11 @@ router.post("/setup/tg/send-code", async (req, res): Promise<void> => {
   }
 
   try {
-    const client = new TelegramClient(new StringSession(""), apiId, apiHash, {
-      connectionRetries: 3,
-    });
+    const { TelegramClient, StringSession } = loadGram();
+
+    const session = new (StringSession as new (s?: string) => unknown)("");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new TelegramClient(session as any, apiId, apiHash, { connectionRetries: 3 });
     await client.connect();
 
     const result = await client.sendCode({ apiId, apiHash }, phone);
@@ -191,7 +191,7 @@ router.post("/setup/tg/send-code", async (req, res): Promise<void> => {
     res.json({
       ok: true,
       phoneCodeHash: result.phoneCodeHash,
-      next: `Now call /api/setup/tg/sign-in with code from Telegram (check ALL devices where your account is logged in)`,
+      next: "Call /api/setup/tg/sign-in with the code from Telegram",
     });
   } catch (err) {
     logger.error({ err }, "Telegram setup send-code failed");
@@ -223,6 +223,7 @@ router.post("/setup/tg/sign-in", async (req, res): Promise<void> => {
   }
 
   try {
+    const { TelegramClient, Api, computeCheck } = loadGram();
     const client = entry.client as InstanceType<typeof TelegramClient>;
 
     try {
@@ -240,7 +241,7 @@ router.post("/setup/tg/sign-in", async (req, res): Promise<void> => {
       if (msg.includes("SESSION_PASSWORD_NEEDED")) {
         if (!password) {
           res.status(400).json({
-            error: "2FA password required. Add 'password' field and retry /api/setup/tg/sign-in.",
+            error: "2FA password required. Add 'password' field and retry.",
           });
           return;
         }
@@ -264,7 +265,7 @@ router.post("/setup/tg/sign-in", async (req, res): Promise<void> => {
       ok: true,
       sessionString,
       instructions: [
-        "1. Copy sessionString value above",
+        "1. Copy sessionString above",
         "2. Add to Railway Variables: TELEGRAM_STRING_SESSION=<value>",
         "3. Remove TELEGRAM_SETUP_SECRET from Railway Variables",
         "4. Redeploy — bot will now read Telegram channels directly",
