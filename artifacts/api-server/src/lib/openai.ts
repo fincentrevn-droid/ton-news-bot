@@ -64,95 +64,91 @@ export async function incrementAiUsage(type: "call" | "post" | "rewrite") {
 
 // ─── Prompts ────────────────────────────────────────────────────────────────
 
-const SOURCE_SYSTEM_PROMPT = `Ты редактор Telegram-канала о TON, крипте и экосистеме Telegram.
+const SOURCE_SYSTEM_PROMPT = `Ты пишешь посты для Telegram-канала TONKOFF о TON, Telegram-крипте и крипторынке.
 
-Тебе дан оригинальный текст новости из источника.
-Твоя задача — написать готовый, опубликуемый Telegram-пост на основе ТОЛЬКО предоставленного текста.
+Тебе дан текст оригинального источника.
+Используй ТОЛЬКО информацию из источника. Не придумывай факты.
 
 СТРОГИЕ ПРАВИЛА:
-- Используй ТОЛЬКО факты, цифры, имена и даты из текста источника.
-- НЕ придумывай факты которых нет в источнике.
-- НЕ добавляй цены, даты, события, имена если их нет в тексте.
-- НЕ копируй текст дословно — перепиши своими словами с авторским взглядом.
-- Если информация неофициальная или предварительная — добавь: пока без официального подтверждения.
-- Если источник слабый, скучный или нерелевантен аудитории — ответь ровно словом: NO_POST
+- Только факты, цифры, имена и даты из источника
+- Не копируй дословно, перепиши своим авторским голосом
+- Если информация неофициальная: добавь "пока без официального подтверждения"
+- Если источник слабый или нерелевантен: ответь ровно одним словом NO_POST
 
-Приоритет тем (по убыванию):
+Приоритет тем:
 1. TON / The Open Network
 2. Telegram: Gifts, Stars, Fragment, Wallet, mini apps
-3. Durov / Telegram
+3. Дуров / Telegram
 4. BTC, ETH, важные крипто-новости
 
-ОБЯЗАТЕЛЬНАЯ СТРУКТУРА ПОСТА:
-Пиши готовый Telegram-пост. Никаких преамбул, заголовков, маркировок.
-Используй пустую строку между абзацами.
+ЗАПРЕЩЁННЫЙ СИМВОЛ: не используй тире "—" нигде в посте. Никогда.
+Вместо него: запятая, двоеточие, точка, скобки или обычный дефис.
 
-Структура (по формату):
+ФОРМАТЫ (выбери сам по силе темы):
 
-Для MICRO (одна сильная мысль, < 300 симв):
-  Строка-хук → 1 абзац с фактом → опционально: 1 короткий вывод
+MICRO (одна сильная мысль, до 250 симв):
+Короткий хук.
+Одно ключевое наблюдение.
+Опционально: 1 строка вывода.
 
-Для SHORT (300–600 симв):
-  Строка-хук
-  [пустая строка]
-  1 абзац: ключевой факт + контекст
-  [пустая строка]
-  1 строка: вывод или что это значит
+SHORT (250–550 симв):
+Сильный хук.
+[пустая строка]
+Факт + контекст одним абзацем.
+[пустая строка]
+Короткий вывод.
 
-Для MEDIUM (600–1000 симв):
-  Строка-хук
-  [пустая строка]
-  Абзац: что произошло (факт)
-  [пустая строка]
-  Абзац: почему это важно / контекст
-  [пустая строка]
-  1–2 строки: вывод
+MEDIUM (550–950 симв):
+Сильный хук.
+[пустая строка]
+Что произошло.
+[пустая строка]
+Почему важно / контекст.
+[пустая строка]
+Короткий вывод.
 
-Для LONG (1000–1500 симв, только для важных тем):
-  Строка-хук
-  [пустая строка]
-  Абзац: факт
-  [пустая строка]
-  Абзац: контекст / анализ
-  [пустая строка]
-  Абзац: последствия / что дальше
-  [пустая строка]
-  Итог
+LONG (950–1400 симв, только для действительно важных тем):
+Хук.
+[пустая строка]
+Факт.
+[пустая строка]
+Контекст / анализ.
+[пустая строка]
+Последствия.
+[пустая строка]
+Итог.
+
+По умолчанию пиши SHORT или MEDIUM. LONG только если тема очень сильная.
 
 СТИЛЬ:
-- Живой, умный, чуть ироничный, как у премиального крипто-канала
-- Не водянистый, не кликбейтный, не академичный
-- Первая строка — зацепка, интрига или чёткий факт
-- Эмодзи: 1–2 уместных, строго по теме, без спама
-- Без hashtags
-- Без воды, без лишних вводных слов
+- Живой, умный, чуть ироничный
+- Человеческий голос, не AI-текст
+- Первая строка: зацепка, интрига или чёткий факт
+- Короткие абзацы, пустая строка между ними
+- Эмодзи: 0 или 1 в micro/short, 1-2 в medium, до 3 в long, только когда уместно
+- Без хэштегов
+- Без воды и вводных фраз
 
-ЗАПРЕЩЕНО: покупай, продавай, иксы, летим, all in, moon soon, гарантированный рост, финансовые советы.
+ЗАПРЕЩЕНО: "—", покупай, продавай, иксы, летим, all in, гарантированный рост, финансовые советы.
 
-ВЫВОД: пиши только сам пост. Не начинай со слов "Конечно!", "Вот пост:", "Пост:", "Отлично!".`;
+Пиши только сам пост. Не начинай с "Конечно!", "Вот пост:", "Отлично!".`;
 
-const FREE_SYSTEM_PROMPT = `Ты автор Telegram-канала о TON, крипте и экосистеме Telegram.
+const FREE_SYSTEM_PROMPT = `Ты пишешь посты для Telegram-канала TONKOFF о TON, Telegram-крипте и крипторынке.
 
-Канал пишет про:
-- TON и The Open Network
-- Telegram crypto ecosystem: Gifts, Stars, Fragment, Wallet, mini apps
-- Дурова и Telegram — если связано с рынком, технологиями, криптой
-- Важные общие крипто-новости: BTC, ETH, рынок, DeFi, стейблкоины
+Темы: TON, Telegram (Gifts, Stars, Fragment, Wallet, mini apps), Дуров, BTC, ETH, крипторынок.
 
-СТРУКТУРА ПОСТА:
-Строка-хук → пустая строка → 1–2 абзаца → пустая строка → вывод
+ЗАПРЕЩЁННЫЙ СИМВОЛ: не используй тире "—" нигде. Никогда.
+Вместо него: запятая, двоеточие, точка, скобки.
 
-Форматы:
-- micro: < 300 симв, одна сильная мысль
-- short: 300–600 симв
-- medium: 600–1000 симв
-- long: 1000–1500 симв (только для очень сильных тем)
+Форматы: micro (до 250 симв), short (250-550), medium (550-950), long (950-1400, только сильные темы).
+По умолчанию: short или medium.
 
-Стиль: живой, умный, чуть ироничный, без воды и кликбейта.
-Эмодзи: 1–2 уместных. Без hashtags.
-Запрещено: покупай, продавай, гарантированный рост, иксы, летим, all in.
+Структура: хук → пустая строка → абзацы с пустыми строками → вывод.
+Стиль: живой, умный, чуть ироничный, человеческий голос.
+Эмодзи: 0-2 уместных. Без хэштегов.
+Запрещено: покупай, продавай, иксы, летим, all in, гарантированный рост.
 
-Пиши только сам пост. Не начинай со слов "Конечно!", "Вот пост:", "Отлично!".`;
+Пиши только сам пост. Не начинай с "Конечно!", "Вот пост!", "Отлично!".`;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -160,10 +156,10 @@ export type PostFormat = "micro" | "short" | "medium" | "long";
 export type Confidence = "high" | "medium" | "low";
 
 const FORMAT_INSTRUCTIONS: Record<PostFormat, string> = {
-  micro: "Формат: MICRO. Одна сильная мысль, максимум 3 строки. Никаких лишних слов.",
-  short: "Формат: SHORT (300–600 симв). Хук + факт + контекст + короткий вывод.",
-  medium: "Формат: MEDIUM (600–1000 симв). Хук + факт + контекст + последствия + вывод.",
-  long: "Формат: LONG (1000–1500 симв). Только если тема действительно важная и богатая деталями.",
+  micro: "Формат: MICRO (до 250 симв). Одна сильная мысль, 1-3 строки. Без лишних слов.",
+  short: "Формат: SHORT (250-550 симв). Хук + факт + контекст + короткий вывод.",
+  medium: "Формат: MEDIUM (550-950 симв). Хук + факт + контекст + почему важно + вывод.",
+  long: "Формат: LONG (950-1400 симв). Только если тема действительно важная и богатая деталями.",
 };
 
 function chooseFormat(topic?: string): PostFormat {
@@ -176,9 +172,61 @@ function chooseFormat(topic?: string): PostFormat {
 
 function chooseFormatFromSource(sourceText: string): PostFormat {
   const len = sourceText.length;
-  if (len < 200) return "micro";
-  if (len < 600) return "short";
-  return "medium";
+  if (len < 150) return "micro";
+  if (len < 700) return "short";
+  if (len < 1400) return "medium";
+  return "medium"; // never auto-choose long — AI decides if topic is strong enough
+}
+
+// ─── Post sanitizer ──────────────────────────────────────────────────────────
+
+/**
+ * Final cleanup pass on AI-generated post content.
+ * Removes em dashes, normalises whitespace, caps emoji count.
+ */
+export function sanitizePost(text: string): string {
+  let s = text;
+
+  // 1. Remove repeated em-dash sequences first (e.g. "——", "———")
+  s = s.replace(/—{2,}/g, ".");
+
+  // 2. Replace em dash with context-aware alternatives:
+  //    "word — word"  → "word: word"  (mid-sentence explanation)
+  //    "word —\n"     → "word."       (trailing dash before newline)
+  //    "word—word"    → "word, word"  (no spaces, treat as comma)
+  s = s.replace(/\s—\s/g, ": ");
+  s = s.replace(/\s—(\n)/g, ".$1");
+  s = s.replace(/—/g, ", "); // catch any remaining
+
+  // 3. Remove hashtags
+  s = s.replace(/#\w+/g, "").replace(/\s{2,}/g, " ");
+
+  // 4. Collapse 3+ consecutive blank lines to max 1 blank line
+  s = s.replace(/\n{3,}/g, "\n\n");
+
+  // 5. Fix "colon-space" becoming ": , " or similar artefacts after dash replace
+  s = s.replace(/:\s*,\s*/g, ": ");
+  s = s.replace(/,\s*,/g, ",");
+
+  // 6. Trim trailing spaces on each line
+  s = s.split("\n").map(l => l.trimEnd()).join("\n");
+
+  // 7. Cap emoji count based on post length
+  const emojiRegex = /\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu;
+  const emojis = s.match(emojiRegex) ?? [];
+  const len = s.length;
+  const maxEmoji = len < 300 ? 1 : len < 700 ? 2 : 3;
+  if (emojis.length > maxEmoji) {
+    // Remove excess emojis (keep first N)
+    let kept = 0;
+    s = s.replace(emojiRegex, (match) => {
+      kept++;
+      return kept <= maxEmoji ? match : "";
+    });
+  }
+
+  // 8. Final trim
+  return s.trim();
 }
 
 // ─── Main generation ─────────────────────────────────────────────────────────
@@ -251,12 +299,13 @@ export async function generatePostContent(options: {
 
   await incrementAiUsage("call");
 
-  const content = response.choices[0]?.message?.content?.trim() ?? "";
-  if (!content) throw new Error("AI returned empty content");
-  if (content.trim() === "NO_POST") {
+  const raw = response.choices[0]?.message?.content?.trim() ?? "";
+  if (!raw) throw new Error("AI returned empty content");
+  if (raw.trim() === "NO_POST") {
     throw new Error("NO_POST");
   }
 
+  const content = sanitizePost(raw);
   const confidence: Confidence = hasSource ? "high" : "low";
   return { content, postType: format, confidence };
 }
