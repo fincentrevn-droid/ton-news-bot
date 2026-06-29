@@ -128,6 +128,9 @@ export interface ReviewMeta {
   sourcePreview?: string;
   sourceLink?: string;
   confidence?: string;
+  qualityScore?: number;
+  qualityIssues?: string[];
+  safeForAutopublish?: boolean;
 }
 
 const REVIEW_KEYBOARD = (postId: number) => ({
@@ -166,6 +169,14 @@ function buildReviewCaption(
   }
   if (safetyWarnings.length > 0) {
     metaLines.push(`⚠️ Удалены ссылки: ${safetyWarnings.map(w => escapeHtml(w)).join(", ")}`);
+  }
+  if (meta?.qualityScore !== undefined) {
+    const emoji = meta.qualityScore >= 80 ? "✅" : meta.qualityScore >= 60 ? "⚠️" : "❌";
+    const autoTag = meta.safeForAutopublish === false ? " · ручная проверка" : "";
+    metaLines.push(`${emoji} QC: <b>${meta.qualityScore}/100</b>${autoTag}`);
+    if (meta.qualityIssues?.length) {
+      metaLines.push(`<i>${meta.qualityIssues.slice(0, 3).map(i => escapeHtml(i)).join(" · ")}</i>`);
+    }
   }
   const formatLabel = postType ? postType.toUpperCase() : "?";
   metaLines.push(`<code>#${postId} · ${formatLabel}</code>`);
