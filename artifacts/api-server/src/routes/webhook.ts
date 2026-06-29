@@ -145,7 +145,20 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  if (text.startsWith("/status")) {
+  if (text.startsWith("/start")) {
+    const msg =
+      `👋 <b>TON News Bot</b>\n\n` +
+      `Бот для автоматизации Telegram-канала про TON и крипту.\n\n` +
+      `<b>Команды:</b>\n` +
+      `/status — статус постов и AI-вызовов сегодня\n` +
+      `/generate_now — запустить генерацию вручную\n` +
+      `/sources — активные источники\n` +
+      `/costs — AI-расходы и лимиты\n` +
+      `/help — справка\n\n` +
+      `📌 Каждый новый пост придёт сюда с кнопками ✅ 🔁 ❌`;
+    await sendReply(msg);
+
+  } else if (text.startsWith("/status")) {
     const [usage, settings] = await Promise.all([getOrCreateTodayUsage(), getSettings()]);
     const [drafts, published, pendingReview, skipped, safetyRejected] = await Promise.all([
       db.select({ count: sql<number>`count(*)` }).from(postsTable).where(eq(postsTable.status, "draft")),
