@@ -11,4 +11,16 @@ export interface ScheduleUpdate {
   intervalHours?: number;
   maxPostsPerDay?: number;
   autoPublish?: boolean;
+  postingTimezone?: string;
+  postingStartTime?: string;
+  postingEndTime?: string;
+  nightPauseEnabled?: boolean;
+  nightPauseStart?: string;
+  nightPauseEnd?: string;
+  minPostsPerDay?: number;
+  targetPostsPerDay?: number;
+  minMinutesBetweenPosts?: number;
+  maxMinutesBetweenPosts?: number;
+  randomDelayEnabled?: boolean;
+  randomDelayMinutes?: number;
 }
