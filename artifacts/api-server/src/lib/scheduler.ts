@@ -1,11 +1,12 @@
 import { db, schedulesTable, postsTable } from "@workspace/db";
 import { eq, and, isNull, gte, sql } from "drizzle-orm";
-import { sendTelegramMessage, sendPhotoPost } from "./telegram";
+import { sendTelegramMessage, sendPhotoPost, notifyOwner } from "./telegram";
+import { checkAiLimitReached, getOrCreateTodayUsage, getSettings } from "./openai";
+import { generateAndQueuePost } from "./auto-generate";
 import { logger } from "./logger";
 
 // ─── Time helpers ────────────────────────────────────────────────────────────
 
-/** Returns "HH:MM" in the given timezone */
 function localHHMM(timezone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     timeZone: timezone,
@@ -15,16 +16,13 @@ function localHHMM(timezone: string): string {
   }).format(new Date());
 }
 
-/** "HH:MM" → minutes since midnight */
 function toMin(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
 }
 
-/** True if nowMin is within [start, end) (handles midnight-spanning ranges) */
 function inRange(nowMin: number, startMin: number, endMin: number): boolean {
   if (startMin <= endMin) return nowMin >= startMin && nowMin < endMin;
-  // Midnight-spanning range (e.g. 23:00 → 06:00)
   return nowMin >= startMin || nowMin < endMin;
 }
 
@@ -54,7 +52,6 @@ export function isInActiveWindow(schedule: {
 // ─── Daily count (approximate, timezone-aware) ────────────────────────────────
 
 async function countPublishedToday(timezone: string): Promise<number> {
-  // How many minutes elapsed since local midnight
   const [hStr, mStr] = localHHMM(timezone).split(":");
   const minutesSinceMidnight = Number(hStr) * 60 + Number(mStr);
   const since = new Date(Date.now() - minutesSinceMidnight * 60 * 1000);
@@ -62,16 +59,11 @@ async function countPublishedToday(timezone: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)` })
     .from(postsTable)
-    .where(
-      and(
-        eq(postsTable.status, "published"),
-        gte(postsTable.publishedAt, since),
-      ),
-    );
+    .where(and(eq(postsTable.status, "published"), gte(postsTable.publishedAt, since)));
   return Number(row?.count ?? 0);
 }
 
-// ─── Quality gate ─────────────────────────────────────────────────────────────
+// ─── Quality gate for scheduler ──────────────────────────────────────────────
 
 function passesAutoPublishQuality(post: {
   confidence: string | null;
@@ -81,11 +73,15 @@ function passesAutoPublishQuality(post: {
 }): boolean {
   if (!post.generatedFromSource) return false;
   if (post.confidence === "low") return false;
-  if (post.safetyStatus === "rejected") return false;
-  if (post.safetyStatus === "warning") return false;
+  if (post.safetyStatus === "rejected") return false; // "flagged" = links stripped but ok
   if (!post.content.trim()) return false;
   return true;
 }
+
+// ─── Auto-generation cooldown (in-memory, resets on restart) ─────────────────
+
+let lastAutoGenerateAttemptMs = 0;
+let autoGenerateInProgress = false;
 
 // ─── Main tick ───────────────────────────────────────────────────────────────
 
@@ -109,7 +105,7 @@ export async function tickPublisher(): Promise<void> {
       return;
     }
 
-    // Minimum spacing check
+    // Minimum spacing check (only applies to publishing, not generation trigger)
     if (schedule.lastPublishedAt) {
       let minMs = schedule.minMinutesBetweenPosts * 60 * 1000;
       if (schedule.randomDelayEnabled) {
@@ -126,28 +122,23 @@ export async function tickPublisher(): Promise<void> {
       }
     }
 
-    // Find the oldest queued draft ready for auto-publish:
-    //   - status = draft
-    //   - reviewMessageId IS NULL (not in manual review)
-    //   - passes quality gate
+    // Find the oldest queued draft ready for auto-publish
     const candidates = await db
       .select()
       .from(postsTable)
-      .where(
-        and(
-          eq(postsTable.status, "draft"),
-          isNull(postsTable.reviewMessageId),
-        ),
-      )
+      .where(and(eq(postsTable.status, "draft"), isNull(postsTable.reviewMessageId)))
       .orderBy(postsTable.createdAt)
       .limit(10);
 
     const post = candidates.find((p) => passesAutoPublishQuality(p));
+
     if (!post) {
-      logger.debug({ candidatesChecked: candidates.length }, "Scheduler tick: no qualifying draft to publish");
+      // Queue is empty — trigger auto-generation if cooldown has passed
+      await maybeAutoGenerate(schedule.minMinutesBetweenPosts);
       return;
     }
 
+    // ── Publish the queued post ──────────────────────────────────────────────
     logger.info({ postId: post.id, format: post.postType, confidence: post.confidence }, "Scheduler: auto-publishing post");
 
     let messageId: number;
@@ -180,6 +171,61 @@ export async function tickPublisher(): Promise<void> {
   } catch (err) {
     logger.error({ err }, "Scheduler tick error");
   }
+}
+
+/**
+ * Trigger a background post generation when the queue is empty.
+ * Uses a per-process cooldown to avoid generating on every 2-min tick.
+ */
+async function maybeAutoGenerate(minMinutesBetweenPosts: number): Promise<void> {
+  if (autoGenerateInProgress) {
+    logger.debug("Scheduler: generation already in progress — skipping");
+    return;
+  }
+
+  // Cooldown: wait at least minMinutesBetweenPosts between generation attempts
+  const cooldownMs = Math.max(minMinutesBetweenPosts, 75) * 60 * 1000;
+  const elapsed = Date.now() - lastAutoGenerateAttemptMs;
+  if (lastAutoGenerateAttemptMs > 0 && elapsed < cooldownMs) {
+    logger.debug(
+      { elapsedMin: Math.round(elapsed / 60000), cooldownMin: Math.round(cooldownMs / 60000) },
+      "Scheduler: generation cooldown active",
+    );
+    return;
+  }
+
+  // Check AI limits before triggering
+  const limit = await checkAiLimitReached();
+  if (limit.blocked) {
+    logger.info({ reason: limit.reason }, "Scheduler: AI limit reached — skipping auto-generation");
+    return;
+  }
+
+  // Check daily post count from AI usage table
+  const [usage, settings] = await Promise.all([getOrCreateTodayUsage(), getSettings()]);
+  if (usage.postsGenerated >= settings.maxPostsPerDay) {
+    logger.debug({ generated: usage.postsGenerated, max: settings.maxPostsPerDay }, "Scheduler: daily post limit — skipping generation");
+    return;
+  }
+
+  lastAutoGenerateAttemptMs = Date.now();
+  autoGenerateInProgress = true;
+  logger.info("Scheduler: queue empty — triggering auto-generation");
+
+  generateAndQueuePost(notifyOwner)
+    .then((result) => {
+      if (result) {
+        logger.info({ postId: result.postId, queued: result.queued, qc: result.qualityScore }, "Scheduler: auto-generation completed");
+      } else {
+        logger.info("Scheduler: auto-generation returned no post (no sources or all NO_POST)");
+      }
+    })
+    .catch((err) => {
+      logger.error({ err }, "Scheduler: auto-generation failed");
+    })
+    .finally(() => {
+      autoGenerateInProgress = false;
+    });
 }
 
 // ─── Startup ─────────────────────────────────────────────────────────────────
