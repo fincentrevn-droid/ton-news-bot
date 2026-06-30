@@ -51,13 +51,20 @@ export interface GenerateResult {
 export async function generateAndQueuePost(
   notify: NotifyFn = silentNotify,
 ): Promise<GenerateResult | null> {
-  const sourcePosts = await fetchSourcePosts();
+  const maxSourceAgeHours = parseInt(process.env.MAX_SOURCE_AGE_HOURS ?? "48", 10);
+  const freshnessMs = maxSourceAgeHours * 60 * 60 * 1000;
+  const freshnessThreshold = new Date(Date.now() - freshnessMs);
+
+  const allSourcePosts = await fetchSourcePosts();
+
+  // ── Freshness filter: discard sources older than MAX_SOURCE_AGE_HOURS ────
+  const sourcePosts = allSourcePosts.filter((p) => p.pubDate >= freshnessThreshold);
 
   if (sourcePosts.length === 0) {
     const noSession = !process.env.TELEGRAM_STRING_SESSION;
     const msg = noSession
       ? "⚠️ TELEGRAM_STRING_SESSION не задан — Telegram-каналы недоступны."
-      : "⚠️ Нет свежих источников за 72ч — пост не создан.";
+      : `⚠️ Нет свежих источников за ${maxSourceAgeHours}ч — пост не создан.`;
     await notify(msg);
     return null;
   }
@@ -125,7 +132,7 @@ export async function generateAndQueuePost(
 
   // ── AI quality check ──────────────────────────────────────────────────────
   const qualityCheckEnabled = process.env.ENABLE_AI_QUALITY_CHECK !== "false";
-  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "80", 10);
+  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "85", 10);
   const maxQualityRewrites = parseInt(process.env.MAX_AUTO_QUALITY_REWRITES ?? "1", 10);
 
   let finalContent = cleanedContent;
@@ -188,7 +195,9 @@ export async function generateAndQueuePost(
     !qualityCheckEnabled ||
     !qualityResult ||
     (qualityResult.quality_score >= minQualityScore && qualityResult.safe_for_autopublish);
-  const routeToQueue = autoPublishEnabled && qualifies && qualityOk;
+  // Source must be fresh (within MAX_SOURCE_AGE_HOURS) and generated from a real source
+  const sourceAgeOk = candidate.pubDate >= freshnessThreshold;
+  const routeToQueue = autoPublishEnabled && qualifies && qualityOk && sourceAgeOk;
 
   // ── Insert post ───────────────────────────────────────────────────────────
   const [post] = await db
