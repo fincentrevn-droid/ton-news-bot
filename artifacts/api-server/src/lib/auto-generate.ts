@@ -12,7 +12,7 @@ import {
   rewriteWithFeedback,
   type QualityCheckResult,
 } from "./openai";
-import { sendReviewMessage, type ReviewMeta } from "./telegram";
+import { sendReviewMessage, uploadPhotoGetFileId, type ReviewMeta } from "./telegram";
 import { fetchSourcePosts } from "./sources";
 import { checkSafety, cleanContent } from "./safety";
 import { logger } from "./logger";
@@ -199,6 +199,18 @@ export async function generateAndQueuePost(
   const sourceAgeOk = candidate.pubDate >= freshnessThreshold;
   const routeToQueue = autoPublishEnabled && qualifies && qualityOk && sourceAgeOk;
 
+  // ── Pre-upload media for queued posts ────────────────────────────────────
+  // For manual-review posts, sendReviewMessage uploads the photo and returns file_id.
+  // For queued posts, that never happens — upload now so the scheduler can publish with photo.
+  let preUploadedFileId: string | null = null;
+  if (routeToQueue && hasMedia && candidate.mediaBuffer) {
+    try {
+      preUploadedFileId = await uploadPhotoGetFileId(candidate.mediaBuffer);
+    } catch (err) {
+      logger.warn({ err }, "Failed to pre-upload media for queued post — will publish as text");
+    }
+  }
+
   // ── Insert post ───────────────────────────────────────────────────────────
   const [post] = await db
     .insert(postsTable)
@@ -220,6 +232,7 @@ export async function generateAndQueuePost(
       hasMedia,
       mediaType: candidate.mediaType ?? null,
       mediaDownloadStatus: hasMedia ? "ok" : null,
+      mediaFileId: preUploadedFileId,
       qualityScore: qualityResult?.quality_score ?? null,
       qualityCheckPassed: qualityResult?.passed ?? null,
       qualityIssues: qualityResult?.issues?.length ? JSON.stringify(qualityResult.issues) : null,
