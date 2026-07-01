@@ -16,10 +16,10 @@ function todayDate(): string {
 
 export async function getOrCreateTodayUsage() {
   const today = todayDate();
-  const existing = await db.select().from(aiUsageTable).where(eq(aiUsageTable.date, today));
-  if (existing.length > 0) return existing[0];
-  const [created] = await db.insert(aiUsageTable).values({ date: today }).returning();
-  return created;
+  // Atomic upsert: safe under concurrent requests (avoids SELECT→INSERT race)
+  await db.insert(aiUsageTable).values({ date: today }).onConflictDoNothing();
+  const [row] = await db.select().from(aiUsageTable).where(eq(aiUsageTable.date, today));
+  return row;
 }
 
 export async function getSettings() {
