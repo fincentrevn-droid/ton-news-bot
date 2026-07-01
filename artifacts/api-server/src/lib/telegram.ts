@@ -121,6 +121,31 @@ export async function sendPhotoPost(
   return { messageId, fileId };
 }
 
+/**
+ * Upload a photo buffer to the review chat and return the Telegram file_id.
+ * Used to pre-stage media for posts going to the auto-publish queue,
+ * where sendReviewMessage is never called (so there's no other chance to get the file_id).
+ */
+export async function uploadPhotoGetFileId(buffer: Buffer): Promise<string> {
+  const token = getBotToken();
+  const chatId = process.env.REVIEW_CHAT_ID;
+  if (!chatId) throw new Error("REVIEW_CHAT_ID not set — cannot pre-upload media");
+
+  const data = await telegramMultipart(token, "sendPhoto", {
+    chat_id: chatId,
+    caption: "📸 Медиа для авто-поста",
+    disable_notification: "true",
+  }, buffer) as { ok: boolean; result?: unknown; description?: string };
+
+  if (!data.ok) {
+    throw new Error(`Telegram uploadPhoto error: ${(data as any).description}`);
+  }
+
+  const fileId = extractFileId(data.result);
+  logger.info({ fileId: fileId.slice(0, 20) }, "Photo pre-uploaded for queued post");
+  return fileId;
+}
+
 // ─── Review message ──────────────────────────────────────────────────────────
 
 export interface ReviewMeta {
