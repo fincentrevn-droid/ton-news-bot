@@ -72,6 +72,12 @@ const CHANNEL_SIGNATURE = "@fincentre_business";
 const MIN_POST_BODY_CHARS = 80;
 const MAX_POST_BODY_CHARS = 500;
 
+function formatSourcePublishedAt(value?: Date | string): string {
+  if (!value) return "не передано";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "некоректна дата" : `${date.toISOString()} (UTC)`;
+}
+
 const SOURCE_SYSTEM_PROMPT = `РОЛЬ
 Ти суворий редактор українського Telegram-каналу «ЦФЮК | Бізнес».
 
@@ -372,6 +378,7 @@ export async function generatePostContent(options: {
   sourceText?: string;
   sourceUrl?: string;
   sourceChannel?: string;
+  sourcePublishedAt?: Date | string;
   additionalContext?: string;
   forceFormat?: PostFormat;
 }): Promise<{ content: string; postType: PostFormat; confidence: Confidence }> {
@@ -394,6 +401,7 @@ export async function generatePostContent(options: {
     systemPrompt = SOURCE_SYSTEM_PROMPT;
     userMessage = [
       `Поточний час для перевірки 24-годинного вікна: ${new Date().toISOString()} (UTC)`,
+      `Час публікації матеріалу: ${formatSourcePublishedAt(options.sourcePublishedAt)}`,
       `Джерело для внутрішньої перевірки: ${options.sourceChannel ?? "RSS"}`,
       options.sourceUrl ? `Посилання: ${options.sourceUrl}` : null,
       "",
@@ -529,6 +537,7 @@ export interface QualityCheckResult {
 export async function runQualityCheck(
   content: string,
   sourceText?: string,
+  sourcePublishedAt?: Date | string,
 ): Promise<QualityCheckResult> {
   const defaultFail: QualityCheckResult = {
     quality_score: 0,
@@ -548,6 +557,7 @@ export async function runQualityCheck(
 
   const userMsg = [
     `Поточний час для перевірки 24-годинного вікна: ${new Date().toISOString()} (UTC)`,
+    `Час публікації матеріалу: ${formatSourcePublishedAt(sourcePublishedAt)}`,
     "Перевір цей пост:",
     '"""',
     content,
@@ -640,6 +650,7 @@ export async function rewriteWithFeedback(opts: {
   instruction: string;
   sourceText?: string;
   sourceChannel?: string;
+  sourcePublishedAt?: Date | string;
   originalFormat?: PostFormat;
 }): Promise<string> {
   const limit = await checkAiLimitReached();
@@ -655,6 +666,7 @@ export async function rewriteWithFeedback(opts: {
 
   const userMsg = [
     `Поточний час для перевірки 24-годинного вікна: ${new Date().toISOString()} (UTC)`,
+    `Час публікації матеріалу: ${formatSourcePublishedAt(opts.sourcePublishedAt)}`,
     "Покращ пост за зауваженнями редактора. Збережи всі факти з матеріалу.",
     "Не вигадуй нових фактів. Виправ лише зазначені проблеми.",
     "",
