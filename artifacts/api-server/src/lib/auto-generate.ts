@@ -117,6 +117,7 @@ export async function generateAndQueuePost(
         sourceText: candidate.fullText,
         sourceUrl: candidate.link,
         sourceChannel: candidate.channel,
+        sourcePublishedAt: candidate.pubDate,
       }));
       break;
     } catch (err) {
@@ -152,7 +153,7 @@ export async function generateAndQueuePost(
 
   if (qualityCheckEnabled) {
     try {
-      qualityResult = await runQualityCheck(cleanedContent, candidate.fullText);
+      qualityResult = await runQualityCheck(cleanedContent, candidate.fullText, candidate.pubDate);
       logger.info(
         { score: qualityResult.quality_score, passed: qualityResult.passed, needs_rewrite: qualityResult.needs_rewrite },
         "Quality check result",
@@ -171,11 +172,12 @@ export async function generateAndQueuePost(
             instruction: qualityResult.rewrite_instruction,
             sourceText: candidate.fullText,
             sourceChannel: candidate.channel,
+            sourcePublishedAt: candidate.pubDate,
             originalFormat: postType,
           });
           rewriteAttempts++;
 
-          const recheck = await runQualityCheck(rewritten, candidate.fullText);
+          const recheck = await runQualityCheck(rewritten, candidate.fullText, candidate.pubDate);
           logger.info(
             { score: recheck.quality_score, passed: recheck.passed, rewriteAttempts },
             "Quality re-check after rewrite",
