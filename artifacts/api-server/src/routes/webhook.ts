@@ -108,6 +108,7 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
         sourceText: post.sourcePreview ?? undefined,
         sourceUrl: post.sourceLink ?? post.sourceUrl ?? undefined,
         sourceChannel: post.sourceChannel ?? undefined,
+        sourcePublishedAt: post.sourceDate ?? undefined,
         forceFormat: post.postType as "micro" | "short" | "medium" | "long",
       });
 
