@@ -32,6 +32,16 @@ const BUSINESS_SOURCES = [
 ];
 
 const LEGACY_TON_SOURCE_URLS = new Set([
+  // Sources stored in the original TONKOFF production database.
+  "@cryptwit",
+  "@TON_ins",
+  "@ruton",
+  "@tonienftik",
+  "@ton_vseznayka",
+  "@givemetonru",
+  "@gramlow",
+  "@tonEnternity",
+  "@investkingyru",
   "@ton_blockchain",
   "@toncoin",
   "@durov",
