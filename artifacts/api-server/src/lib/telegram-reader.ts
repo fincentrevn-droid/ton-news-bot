@@ -2,6 +2,12 @@ import { createHash } from "crypto";
 import { createRequire } from "node:module";
 import { logger } from "./logger";
 import type { SourcePost } from "./sources";
+import {
+  hasHighRiskRegulatoryClaim,
+  isHardBlockedSource,
+  MIN_BUSINESS_RELEVANCE_SCORE,
+  scoreBusinessRelevance,
+} from "./business-filter";
 
 // Load gramjs as CJS via require — avoids ESM/CJS interop issues with esbuild
 const _req = createRequire(import.meta.url);
@@ -59,19 +65,8 @@ async function getClient(): Promise<import("telegram").TelegramClient | null> {
   }
 }
 
-const RELEVANT_KEYWORDS = [
-  "ton", "the open network", "toncoin",
-  "telegram gifts", "gifts", "telegram stars", "stars", "fragment",
-  "telegram wallet", "telegram mini app", "durov", "pavel durov",
-  "btc", "bitcoin", "eth", "ethereum",
-  "crypto", "blockchain", "defi", "nft", "airdrop", "etf",
-  "stablecoin", "usdt", "usdc", "exchange", "binance", "coinbase",
-  "regulation", "sec", "hack", "exploit", "layer 2", "solana",
-];
-
 function scoreText(text: string): number {
-  const lower = text.toLowerCase();
-  return RELEVANT_KEYWORDS.filter((kw) => lower.includes(kw)).length;
+  return scoreBusinessRelevance(text);
 }
 
 function hasPhotoMedia(msg: unknown): boolean {
@@ -102,7 +97,7 @@ async function downloadPhoto(
 }
 
 export async function fetchTelegramChannelPosts(
-  channels: { name: string; url: string }[],
+  channels: { name: string; url: string; isPrimary?: boolean }[],
   lookbackHours = 72,
 ): Promise<SourcePost[]> {
   const client = await getClient();
@@ -138,9 +133,11 @@ export async function fetchTelegramChannelPosts(
         const date = new Date((msgAny.date ?? 0) * 1000);
         if (date < cutoff) continue;
 
+        if (isHardBlockedSource(text)) continue;
+        if (!ch.isPrimary && hasHighRiskRegulatoryClaim(text)) continue;
         const score = scoreText(text);
-        // Skip completely irrelevant text-only posts, but keep photo posts
-        if (score === 0 && !hasPhoto) continue;
+        // A photo never overrides relevance: hard filters apply to every source post.
+        if (score < (ch.isPrimary ? 1 : MIN_BUSINESS_RELEVANCE_SCORE)) continue;
 
         const fullText = text.slice(0, 1200);
         const textHash = createHash("sha256")
@@ -154,7 +151,7 @@ export async function fetchTelegramChannelPosts(
         // Download photo if present
         let mediaBuffer: Buffer | undefined;
         let mediaType: "photo" | "none" = "none";
-        if (hasPhoto) {
+        if (hasPhoto && process.env.ENABLE_MEDIA_DOWNLOAD === "true") {
           mediaBuffer = await downloadPhoto(client, msg, ch.name);
           if (mediaBuffer) {
             mediaType = "photo";
@@ -173,6 +170,7 @@ export async function fetchTelegramChannelPosts(
           textHash,
           preview: fullText.slice(0, 450),
           relevanceScore: score,
+          isPrimarySource: Boolean(ch.isPrimary),
           mediaType,
           mediaBuffer,
         });
@@ -190,7 +188,9 @@ export async function fetchTelegramChannelPosts(
     }
   }
 
-  return all.filter((p) => p.relevanceScore > 0 || p.mediaType === "photo");
+  return all.filter(
+    (p) => p.relevanceScore >= (p.isPrimarySource ? 1 : MIN_BUSINESS_RELEVANCE_SCORE),
+  );
 }
 
 export interface ChannelStatsResult {
@@ -210,15 +210,19 @@ export async function getChannelStats(): Promise<ChannelStatsResult | null> {
 
   const gram = _req("telegram") as typeof import("telegram");
 
-  // Resolve entity from Bot API channel ID (e.g. -1001234567890)
+  // Resolve either a public @username or a Bot API numeric channel ID.
   let entity: unknown;
   try {
-    const numericStr = rawId.startsWith("-100")
-      ? rawId.slice(4)
-      : rawId.replace("-", "");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const peer = new gram.Api.PeerChannel({ channelId: BigInt(numericStr) as any });
-    entity = await client.getEntity(peer);
+    if (rawId.startsWith("@") || rawId.includes("t.me/")) {
+      entity = await client.getEntity(rawId);
+    } else {
+      const numericStr = rawId.startsWith("-100")
+        ? rawId.slice(4)
+        : rawId.replace("-", "");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const peer = new gram.Api.PeerChannel({ channelId: BigInt(numericStr) as any });
+      entity = await client.getEntity(peer);
+    }
   } catch (err) {
     logger.warn({ err, rawId }, "getChannelStats: could not resolve channel entity");
     return null;

@@ -70,10 +70,17 @@ function passesAutoPublishQuality(post: {
   safetyStatus: string | null;
   generatedFromSource: boolean | null;
   content: string;
+  qualityScore: number | null;
+  qualityCheckPassed: boolean | null;
+  safeForAutopublish: boolean | null;
 }): boolean {
   if (!post.generatedFromSource) return false;
   if (post.confidence === "low") return false;
-  if (post.safetyStatus === "rejected") return false; // "flagged" = links stripped but ok
+  if (post.safetyStatus !== "ok") return false;
+  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "90", 10);
+  if (post.qualityCheckPassed !== true) return false;
+  if (post.safeForAutopublish !== true) return false;
+  if ((post.qualityScore ?? 0) < minQualityScore) return false;
   if (!post.content.trim()) return false;
   return true;
 }

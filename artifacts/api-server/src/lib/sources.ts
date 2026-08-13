@@ -3,6 +3,12 @@ import { db, sourcesTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { logger } from "./logger";
 import { fetchTelegramChannelPosts, isTelegramReaderAvailable } from "./telegram-reader";
+import {
+  hasHighRiskRegulatoryClaim,
+  isHardBlockedSource,
+  MIN_BUSINESS_RELEVANCE_SCORE,
+  scoreBusinessRelevance,
+} from "./business-filter";
 
 export interface SourcePost {
   title: string;
@@ -15,20 +21,11 @@ export interface SourcePost {
   textHash: string;
   preview: string;
   relevanceScore: number;
+  isPrimarySource?: boolean;
   // Media extracted from source (Telegram posts only)
   mediaType?: "photo" | "none";
   mediaBuffer?: Buffer;
 }
-
-const RELEVANT_KEYWORDS = [
-  "ton", "the open network", "toncoin",
-  "telegram gifts", "gifts", "telegram stars", "stars", "fragment",
-  "telegram wallet", "telegram mini app", "durov", "pavel durov",
-  "btc", "bitcoin", "eth", "ethereum",
-  "crypto", "blockchain", "defi", "nft", "airdrop", "etf",
-  "stablecoin", "usdt", "usdc", "exchange", "binance", "coinbase",
-  "regulation", "sec", "hack", "exploit", "layer 2", "solana",
-];
 
 function extractTag(xml: string, tag: string): string {
   const pattern = new RegExp(
@@ -66,6 +63,7 @@ function parseItems(
   xml: string,
   sourceName: string,
   sourceUrl: string,
+  isPrimarySource = false,
 ): Omit<SourcePost, "relevanceScore">[] {
   const items: Omit<SourcePost, "relevanceScore">[] = [];
   const matches = xml.matchAll(/<item[^>]*>([\s\S]*?)<\/item>/gi);
@@ -102,6 +100,7 @@ function parseItems(
       channelUrl: sourceUrl,
       textHash,
       preview,
+      isPrimarySource,
     });
   }
 
@@ -109,8 +108,7 @@ function parseItems(
 }
 
 function scoreRelevance(post: Omit<SourcePost, "relevanceScore">): number {
-  const text = `${post.title} ${post.description}`.toLowerCase();
-  return RELEVANT_KEYWORDS.filter((kw) => text.includes(kw)).length;
+  return scoreBusinessRelevance(`${post.title} ${post.description}`);
 }
 
 async function fetchRssPosts(): Promise<SourcePost[]> {
@@ -131,11 +129,11 @@ async function fetchRssPosts(): Promise<SourcePost[]> {
     sources.map(async (src) => {
       const res = await fetch(src.url, {
         signal: AbortSignal.timeout(12_000),
-        headers: { "User-Agent": "TONNewsBot/1.0 RSS Reader" },
+        headers: { "User-Agent": "FincentreBusinessBot/1.0 RSS Reader" },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const xml = await res.text();
-      return parseItems(xml, src.name, src.url);
+      return parseItems(xml, src.name, src.url, src.isPrimary);
     }),
   );
 
@@ -143,6 +141,8 @@ async function fetchRssPosts(): Promise<SourcePost[]> {
     const r = results[i];
     if (r.status === "fulfilled") {
       for (const post of r.value) {
+        if (isHardBlockedSource(post.fullText)) continue;
+        if (!post.isPrimarySource && hasHighRiskRegulatoryClaim(post.fullText)) continue;
         all.push({ ...post, relevanceScore: scoreRelevance(post) });
       }
     } else {
@@ -150,7 +150,11 @@ async function fetchRssPosts(): Promise<SourcePost[]> {
     }
   }
 
-  return all.filter((p) => p.relevanceScore > 0 && p.pubDate >= cutoff);
+  return all.filter(
+    (p) =>
+      p.relevanceScore >= (p.isPrimarySource ? 1 : MIN_BUSINESS_RELEVANCE_SCORE) &&
+      p.pubDate >= cutoff,
+  );
 }
 
 async function fetchTelegramPosts(): Promise<SourcePost[]> {
@@ -169,7 +173,7 @@ async function fetchTelegramPosts(): Promise<SourcePost[]> {
   if (channels.length === 0) return [];
 
   return fetchTelegramChannelPosts(
-    channels.map((c) => ({ name: c.name, url: c.url })),
+    channels.map((c) => ({ name: c.name, url: c.url, isPrimary: c.isPrimary })),
   );
 }
 
@@ -204,17 +208,24 @@ export async function fetchSourcePosts(): Promise<SourcePost[]> {
         const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
         const results = await Promise.allSettled(
           sources.map(async (src) => {
-            const res = await fetch(src.url, { signal: AbortSignal.timeout(12_000), headers: { "User-Agent": "TONNewsBot/1.0 RSS Reader" } });
+            const res = await fetch(src.url, { signal: AbortSignal.timeout(12_000), headers: { "User-Agent": "FincentreBusinessBot/1.0 RSS Reader" } });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const xml = await res.text();
-            return parseItems(xml, src.name, src.url);
+            return parseItems(xml, src.name, src.url, src.isPrimary);
           }),
         );
         for (const r of results) {
           if (r.status === "fulfilled") {
             for (const p of r.value) {
+              if (isHardBlockedSource(p.fullText)) continue;
+              if (!p.isPrimarySource && hasHighRiskRegulatoryClaim(p.fullText)) continue;
               const score = scoreRelevance(p);
-              if (score > 0 && p.pubDate >= cutoff) emergencyRss.push({ ...p, relevanceScore: score });
+              if (
+                score >= (p.isPrimarySource ? 1 : MIN_BUSINESS_RELEVANCE_SCORE) &&
+                p.pubDate >= cutoff
+              ) {
+                emergencyRss.push({ ...p, relevanceScore: score });
+              }
             }
           }
         }
@@ -232,10 +243,12 @@ export async function fetchSourcePosts(): Promise<SourcePost[]> {
     return [];
   }
 
-  // Telegram posts (primary) get a +3 relevance boost
+  // Official primary sources get the strongest boost; trusted media remain eligible.
   const boosted = all.map((p) =>
-    p.channelUrl.startsWith("@")
-      ? { ...p, relevanceScore: p.relevanceScore + 3 }
+    p.isPrimarySource
+      ? { ...p, relevanceScore: p.relevanceScore + 5 }
+      : p.channelUrl.startsWith("@")
+        ? { ...p, relevanceScore: p.relevanceScore + 2 }
       : p,
   );
 

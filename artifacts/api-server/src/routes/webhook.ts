@@ -179,15 +179,15 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
 
   if (text.startsWith("/start")) {
     const msg =
-      `👋 <b>TON News Bot</b>\n\n` +
-      `Бот для автоматизации Telegram-канала про TON и крипту.\n\n` +
-      `<b>Команды:</b>\n` +
-      `/status — статус постов и AI-вызовов сегодня\n` +
-      `/generate_now — запустить генерацию вручную\n` +
-      `/sources — активные источники\n` +
-      `/costs — AI-расходы и лимиты\n` +
-      `/help — справка\n\n` +
-      `📌 Каждый новый пост придёт сюда с кнопками ✅ 🔁 ❌`;
+      `👋 <b>ЦФЮК | Бізнес News Bot</b>\n\n` +
+      `Автопостинг перевірених новин про бізнес та економіку.\n\n` +
+      `<b>Команди:</b>\n` +
+      `/status — статус публікацій та AI-викликів\n` +
+      `/generate_now — перевірити джерела зараз\n` +
+      `/sources — активні джерела\n` +
+      `/costs — AI-витрати й ліміти\n` +
+      `/help — довідка\n\n` +
+      `📌 У канал потрапляють лише матеріали, що пройшли всі автоматичні фільтри.`;
     await sendReply(msg);
 
   } else if (text.startsWith("/status")) {
@@ -203,21 +203,21 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
 
     const msg =
       `📊 <b>Статус бота</b>\n\n` +
-      `📝 Создано постов: ${usage.postsGenerated}/${settings.maxPostsPerDay}\n` +
-      `✅ Опубликовано: ${Number(published[0]?.count ?? 0)}\n` +
-      `⏳ Ожидают ревью: ${Number(pendingReview[0]?.count ?? 0)}\n` +
-      `📋 Черновики: ${Number(drafts[0]?.count ?? 0)}\n` +
+      `📝 Опрацьовано матеріалів: ${usage.postsGenerated}/${settings.maxPostsPerDay}\n` +
+      `✅ Опубліковано: ${Number(published[0]?.count ?? 0)}\n` +
+      `⏳ Очікують перевірки: ${Number(pendingReview[0]?.count ?? 0)}\n` +
+      `📋 Чернетки: ${Number(drafts[0]?.count ?? 0)}\n` +
       `⏭️ Пропущено: ${Number(skipped[0]?.count ?? 0)}\n` +
-      `🚫 Отклонено safety: ${Number(safetyRejected[0]?.count ?? 0)}\n` +
-      `🤖 AI вызовы сегодня: ${usage.callsUsed}/${settings.maxAiCallsPerDay}`;
+      `🚫 Відхилено safety: ${Number(safetyRejected[0]?.count ?? 0)}\n` +
+      `🤖 AI-виклики сьогодні: ${usage.callsUsed}/${settings.maxAiCallsPerDay}`;
     await sendReply(msg);
 
   } else if (text.startsWith("/generate_now")) {
-    await sendReply("🔄 Ищу свежие источники...");
+    await sendReply("🔄 Шукаю свіжі матеріали...");
     try {
       await generateAndQueuePost(sendReply);
     } catch (err) {
-      await sendReply(`❌ Ошибка: ${err instanceof Error ? err.message : "неизвестная"}`);
+      await sendReply(`❌ Помилка: ${err instanceof Error ? err.message : "невідома"}`);
     }
 
   } else if (text.startsWith("/sources")) {
@@ -225,14 +225,14 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
     const primary = sources.filter((s) => s.isPrimary);
     const secondary = sources.filter((s) => !s.isPrimary);
 
-    let msg = `📡 <b>Активные источники</b>\n\n`;
+    let msg = `📡 <b>Активні джерела</b>\n\n`;
     if (primary.length) {
-      msg += `<b>Telegram (основные):</b>\n${primary.map((s) => `• ${s.name} — ${s.url}`).join("\n")}\n\n`;
+      msg += `<b>Офіційні:</b>\n${primary.map((s) => `• ${s.name}: ${s.url}`).join("\n")}\n\n`;
     }
     if (secondary.length) {
-      msg += `<b>RSS/Web (вторичные):</b>\n${secondary.map((s) => `• ${s.name} — ${s.url}`).join("\n")}`;
+      msg += `<b>Додаткові:</b>\n${secondary.map((s) => `• ${s.name}: ${s.url}`).join("\n")}`;
     }
-    if (!primary.length && !secondary.length) msg = "Нет активных источников.";
+    if (!primary.length && !secondary.length) msg = "Немає активних джерел.";
     await sendReply(msg);
 
   } else if (text.startsWith("/costs")) {
@@ -242,24 +242,23 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
     const warning = aiPct >= 80 || postPct >= 80 ? "\n\n⚠️ Лимиты заканчиваются!" : "";
 
     const msg =
-      `💰 <b>Расходы AI сегодня</b>\n\n` +
-      `🤖 AI вызовы: ${usage.callsUsed}/${settings.maxAiCallsPerDay} (${aiPct}%)\n` +
-      `📝 Постов создано: ${usage.postsGenerated}/${settings.maxPostsPerDay} (${postPct}%)\n` +
-      `🔁 Перегенераций: ${usage.rewritesUsed}/${settings.maxRewritePerPost}\n` +
-      `💡 Cost guard: ${settings.enableCostGuard ? "включён" : "выключен"}` +
+      `💰 <b>AI-витрати сьогодні</b>\n\n` +
+      `🤖 AI-виклики: ${usage.callsUsed}/${settings.maxAiCallsPerDay} (${aiPct}%)\n` +
+      `📝 Опрацьовано матеріалів: ${usage.postsGenerated}/${settings.maxPostsPerDay} (${postPct}%)\n` +
+      `🔁 Переписувань: ${usage.rewritesUsed}/${settings.maxRewritePerPost}\n` +
+      `💡 Контроль витрат: ${settings.enableCostGuard ? "увімкнено" : "вимкнено"}` +
       warning;
     await sendReply(msg);
 
   } else if (text.startsWith("/help")) {
     const msg =
-      `🤖 <b>Команды бота</b>\n\n` +
-      `/status — статус постов и AI-вызовов\n` +
-      `/generate_now — найти источник и сгенерировать пост\n` +
-      `/sources — показать активные источники\n` +
-      `/costs — AI-расходы и лимиты\n` +
-      `/help — эта справка\n\n` +
-      `📌 Каждый пост основан на реальном источнике и отправляется на ревью с кнопками:\n` +
-      `✅ Опубликовать  🔁 Переписать  ❌ Пропустить`;
+      `🤖 <b>Команди бота</b>\n\n` +
+      `/status — статус публікацій та AI-викликів\n` +
+      `/generate_now — перевірити свіжі джерела\n` +
+      `/sources — показати активні джерела\n` +
+      `/costs — AI-витрати й ліміти\n` +
+      `/help — ця довідка\n\n` +
+      `📌 Повний автоматичний режим: слабкі або сумнівні матеріали пропускаються.`;
     await sendReply(msg);
   }
 }

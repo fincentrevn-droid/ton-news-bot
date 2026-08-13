@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { db, schedulesTable, postsTable } from "@workspace/db";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { db, schedulesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { UpdateScheduleBody } from "@workspace/api-zod";
-import { generatePostContent, checkAiLimitReached, incrementAiUsage } from "../lib/openai";
-import { sendTelegramMessage, notifyOwner } from "../lib/telegram";
-import { logger } from "../lib/logger";
+import { checkAiLimitReached } from "../lib/openai";
+import { notifyOwner } from "../lib/telegram";
+import { generateAndQueuePost } from "../lib/auto-generate";
 
 const router = Router();
 
@@ -73,42 +73,10 @@ router.post("/schedule/trigger", async (req, res): Promise<void> => {
     return;
   }
 
-  let generated = 0;
-  const topics = [
-    "Последние новости TON ecosystem",
-    "Обновления Telegram Gifts и Stars",
-    "Важные новости крипторынка сегодня",
-  ];
-
   try {
-    for (const topic of topics) {
-      const check = await checkAiLimitReached();
-      if (check.blocked) break;
-
-      const { content, postType } = await generatePostContent({ topic });
-      await incrementAiUsage("post");
-
-      const schedule = await getOrCreateSchedule();
-
-      const [post] = await db
-        .insert(postsTable)
-        .values({ content, postType, topic, aiCallsUsed: 1, status: "draft" })
-        .returning();
-
-      if (schedule.autoPublish) {
-        try {
-          const messageId = await sendTelegramMessage(content);
-          await db
-            .update(postsTable)
-            .set({ status: "published", telegramMessageId: messageId, publishedAt: new Date() })
-            .where(eq(postsTable.id, post.id));
-        } catch (err) {
-          logger.error({ err, postId: post.id }, "Auto-publish failed");
-        }
-      }
-
-      generated++;
-    }
+    // Use the same source, safety and AI quality pipeline as the scheduler.
+    // This prevents the dashboard button from bypassing strict auto-post filters.
+    const result = await generateAndQueuePost();
 
     const now = new Date();
     const schedule = await getOrCreateSchedule();
@@ -118,11 +86,17 @@ router.post("/schedule/trigger", async (req, res): Promise<void> => {
       .set({ lastRunAt: now, nextRunAt: next })
       .where(eq(schedulesTable.id, schedule.id));
 
-    res.json({ success: true, message: `Сгенерировано ${generated} постов`, postsGenerated: generated });
+    res.json({
+      success: true,
+      message: result
+        ? `Матеріал #${result.postId} пройшов перевірку та доданий до черги`
+        : "Відповідного матеріалу не знайдено або він не пройшов фільтри",
+      postsGenerated: result ? 1 : 0,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Generation cycle failed";
     req.log.error({ err }, "Trigger generation error");
-    res.status(500).json({ success: false, message, postsGenerated: generated });
+    res.status(500).json({ success: false, message, postsGenerated: 0 });
   }
 });
 

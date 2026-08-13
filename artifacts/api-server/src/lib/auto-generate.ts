@@ -16,6 +16,7 @@ import { sendReviewMessage, uploadPhotoGetFileId, type ReviewMeta } from "./tele
 import { fetchSourcePosts } from "./sources";
 import { checkSafety, cleanContent } from "./safety";
 import { logger } from "./logger";
+import { areLikelyDuplicate } from "./business-filter";
 
 export type NotifyFn = (msg: string) => Promise<void>;
 
@@ -28,8 +29,8 @@ export function qualifiesForAutoPublish(opts: {
   content: string;
 }): boolean {
   if (opts.confidence === "low") return false;
-  // "flagged" = suspicious links stripped (still publishable), "rejected" = blocked
-  if (opts.safety.status === "rejected") return false;
+  // Full auto mode is strict: even a stripped suspicious link blocks publication.
+  if (opts.safety.status !== "ok") return false;
   if (!opts.content.trim()) return false;
   if (!opts.content.includes("\n\n")) return false;
   return true;
@@ -63,23 +64,33 @@ export async function generateAndQueuePost(
   if (sourcePosts.length === 0) {
     const noSession = !process.env.TELEGRAM_STRING_SESSION;
     const msg = noSession
-      ? "⚠️ TELEGRAM_STRING_SESSION не задан — Telegram-каналы недоступны."
-      : `⚠️ Нет свежих источников за ${maxSourceAgeHours}ч — пост не создан.`;
+      ? "⚠️ TELEGRAM_STRING_SESSION не задано, Telegram-канали недоступні."
+      : `⚠️ Немає свіжих джерел за ${maxSourceAgeHours} год, пост не створено.`;
     await notify(msg);
     return null;
   }
 
   // Avoid re-using source posts from the last 7 days
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const recentHashes = await db
-    .select({ hash: postsTable.sourceTextHash })
+  const recentSources = await db
+    .select({ hash: postsTable.sourceTextHash, preview: postsTable.sourcePreview })
     .from(postsTable)
     .where(and(gte(postsTable.createdAt, sevenDaysAgo), eq(postsTable.generatedFromSource, true)));
 
-  const usedHashes = new Set(recentHashes.map((r) => r.hash).filter(Boolean));
+  const usedHashes = new Set(recentSources.map((r) => r.hash).filter(Boolean));
+  const recentPreviews = recentSources
+    .map((r) => r.preview)
+    .filter((preview): preview is string => Boolean(preview));
 
-  const candidates = sourcePosts.filter((p) => !usedHashes.has(p.textHash));
-  if (candidates.length === 0) candidates.push(...sourcePosts); // fallback: reuse
+  const candidates = sourcePosts.filter(
+    (p) =>
+      !usedHashes.has(p.textHash) &&
+      !recentPreviews.some((preview) => areLikelyDuplicate(p.fullText, preview)),
+  );
+  if (candidates.length === 0) {
+    await notify("ℹ️ Усі свіжі матеріали вже використані або повторюють опубліковані новини.");
+    return null;
+  }
 
   let content: string | null = null;
   let postType: "micro" | "short" | "medium" | "long" = "short";
@@ -98,7 +109,7 @@ export async function generateAndQueuePost(
 
     if (attempt === 0) {
       const mediaNote = candidate.mediaType === "photo" ? " 📷" : "";
-      await notify(`📰 Источник: <b>${candidate.channel}</b>${mediaNote}\n\n🤖 Генерирую пост...`);
+      await notify(`📰 Джерело: <b>${candidate.channel}</b>${mediaNote}\n\n🤖 Готую пост...`);
     }
 
     try {
@@ -119,7 +130,7 @@ export async function generateAndQueuePost(
   }
 
   if (!content) {
-    await notify("ℹ️ Все источники признаны неподходящими — пост не создан.");
+    await notify("ℹ️ Усі джерела визнано непридатними, пост не створено.");
     return null;
   }
 
@@ -132,7 +143,7 @@ export async function generateAndQueuePost(
 
   // ── AI quality check ──────────────────────────────────────────────────────
   const qualityCheckEnabled = process.env.ENABLE_AI_QUALITY_CHECK !== "false";
-  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "85", 10);
+  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "90", 10);
   const maxQualityRewrites = parseInt(process.env.MAX_AUTO_QUALITY_REWRITES ?? "1", 10);
 
   let finalContent = cleanedContent;
@@ -181,7 +192,7 @@ export async function generateAndQueuePost(
         }
       }
     } catch (qcErr) {
-      logger.warn({ qcErr }, "Quality check failed — proceeding without gate");
+      logger.warn({ qcErr }, "Quality check failed — strict gate will reject the post");
     }
   }
 
@@ -191,13 +202,18 @@ export async function generateAndQueuePost(
 
   const autoPublishEnabled = schedule?.autoPublish ?? false;
   const qualifies = qualifiesForAutoPublish({ confidence, safety, content: finalContent });
-  const qualityOk =
-    !qualityCheckEnabled ||
-    !qualityResult ||
-    (qualityResult.quality_score >= minQualityScore && qualityResult.safe_for_autopublish);
+  const qualityOk = !qualityCheckEnabled
+    ? true
+    : Boolean(
+      qualityResult &&
+      qualityResult.passed &&
+      qualityResult.quality_score >= minQualityScore &&
+      qualityResult.safe_for_autopublish,
+    );
   // Source must be fresh (within MAX_SOURCE_AGE_HOURS) and generated from a real source
   const sourceAgeOk = candidate.pubDate >= freshnessThreshold;
   const routeToQueue = autoPublishEnabled && qualifies && qualityOk && sourceAgeOk;
+  const skipForFullAuto = autoPublishEnabled && !routeToQueue;
 
   // ── Pre-upload media for queued posts ────────────────────────────────────
   // For manual-review posts, sendReviewMessage uploads the photo and returns file_id.
@@ -216,6 +232,7 @@ export async function generateAndQueuePost(
     .insert(postsTable)
     .values({
       content: finalContent,
+      status: skipForFullAuto ? "skipped" : "draft",
       postType,
       safetyStatus: safety.status,
       aiCallsUsed: 1 + rewriteAttempts,
@@ -244,13 +261,31 @@ export async function generateAndQueuePost(
   const photoNote = hasMedia ? " с фото 📷" : "";
   const qcNote = qualityResult ? ` · QC ${qualityResult.quality_score}/100` : "";
 
+  if (skipForFullAuto) {
+    logger.info(
+      {
+        postId: post.id,
+        confidence,
+        safety: safety.status,
+        qualityScore: qualityResult?.quality_score,
+        qualityOk,
+        sourceAgeOk,
+      },
+      "Post rejected by strict full-auto filters",
+    );
+    await notify(
+      `⏭️ Матеріал із «<b>${candidate.channel}</b>» не пройшов жорсткі фільтри${qcNote} і пропущений.`,
+    );
+    return null;
+  }
+
   if (routeToQueue) {
     logger.info(
       { postId: post.id, confidence, safety: safety.status, qualityScore: qualityResult?.quality_score },
       "Post queued for auto-publish",
     );
     await notify(
-      `⏳ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote} добавлен в очередь авто-публикации.${qcNote}`,
+      `⏳ Пост #${post.id} із «<b>${candidate.channel}</b>»${photoNote} додано до черги автопублікації.${qcNote}`,
     );
     return { postId: post.id, queued: true, qualityScore: qualityResult?.quality_score, channel: candidate.channel };
   }
@@ -283,6 +318,6 @@ export async function generateAndQueuePost(
     await db.update(postsTable).set(updateFields).where(eq(postsTable.id, post.id));
   }
 
-  await notify(`✅ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote}${qcNote} отправлен на ревью.`);
+  await notify(`✅ Пост #${post.id} із «<b>${candidate.channel}</b>»${photoNote}${qcNote} надіслано на перевірку.`);
   return { postId: post.id, queued: false, qualityScore: qualityResult?.quality_score, channel: candidate.channel };
 }

@@ -277,7 +277,7 @@ function SourceForm({
         <FormField control={form.control} name="name" render={({ field }) => (
           <FormItem>
             <FormLabel>Name</FormLabel>
-            <FormControl><Input placeholder="e.g. TON Blockchain" {...field} /></FormControl>
+            <FormControl><Input placeholder="Наприклад, Національний банк України" {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />
@@ -310,7 +310,7 @@ function SourceForm({
         <FormField control={form.control} name="category" render={({ field }) => (
           <FormItem>
             <FormLabel>Category (Optional)</FormLabel>
-            <FormControl><Input placeholder="e.g. TON, Market, Telegram" {...field} /></FormControl>
+            <FormControl><Input placeholder="Наприклад: Податки, Бізнес, Економіка" {...field} /></FormControl>
             <FormMessage />
           </FormItem>
         )} />

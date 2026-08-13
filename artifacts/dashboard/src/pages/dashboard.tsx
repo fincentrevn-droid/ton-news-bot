@@ -84,8 +84,8 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">TONKOFF</h1>
-            <p className="text-muted-foreground mt-1">Telegram channel dashboard</p>
+            <h1 className="text-3xl font-bold tracking-tight">ЦФЮК | Бізнес</h1>
+            <p className="text-muted-foreground mt-1">Автопостинг бізнес-новин у Telegram</p>
           </div>
           <Button onClick={handleGenerate} disabled={triggerGen.isPending} className="gap-2">
             <Zap className="h-4 w-4" />

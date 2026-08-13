@@ -31,6 +31,51 @@ async function telegramPost(token: string, method: string, body: unknown): Promi
   return res.json();
 }
 
+/**
+ * Fail closed before starting the scheduler: the configured bot must be an
+ * administrator of the target channel with permission to publish messages.
+ */
+export async function verifyPublishingAccess(): Promise<void> {
+  const token = getBotToken();
+  const chatId = getChannelId();
+
+  const me = await telegramPost(token, "getMe", {}) as {
+    ok: boolean;
+    result?: { id: number; username?: string };
+    description?: string;
+  };
+  if (!me.ok || !me.result?.id) {
+    throw new Error(`Telegram getMe failed: ${me.description ?? "unknown error"}`);
+  }
+
+  const member = await telegramPost(token, "getChatMember", {
+    chat_id: chatId,
+    user_id: me.result.id,
+  }) as {
+    ok: boolean;
+    result?: { status?: string; can_post_messages?: boolean };
+    description?: string;
+  };
+  if (!member.ok) {
+    throw new Error(`Telegram channel access check failed: ${member.description ?? "unknown error"}`);
+  }
+
+  const status = member.result?.status;
+  const canPublish =
+    status === "creator" ||
+    (status === "administrator" && member.result?.can_post_messages === true);
+  if (!canPublish) {
+    throw new Error(
+      `Bot @${me.result.username ?? me.result.id} is not allowed to publish to ${chatId}`,
+    );
+  }
+
+  logger.info(
+    { channelId: chatId, botUsername: me.result.username, status },
+    "Telegram publishing access verified",
+  );
+}
+
 // ─── Multipart helper (for photo uploads) ───────────────────────────────────
 
 async function telegramMultipart(token: string, method: string, fields: Record<string, string>, photoBuffer: Buffer): Promise<unknown> {
@@ -338,11 +383,11 @@ export async function notifyOwner(message: string): Promise<void> {
 export async function setupBotCommands(): Promise<void> {
   const token = getBotToken();
   const commands = [
-    { command: "status", description: "Статус: посты, публикации, AI-вызовы сегодня" },
-    { command: "generate_now", description: "Запустить генерацию поста вручную" },
-    { command: "sources", description: "Показать активные источники" },
-    { command: "costs", description: "AI-расходы сегодня" },
-    { command: "help", description: "Показать команды" },
+    { command: "status", description: "Статус публікацій та AI-викликів сьогодні" },
+    { command: "generate_now", description: "Запустити пошук і перевірку матеріалу" },
+    { command: "sources", description: "Показати активні джерела" },
+    { command: "costs", description: "AI-витрати сьогодні" },
+    { command: "help", description: "Показати команди" },
   ];
 
   const data = await telegramPost(token, "setMyCommands", { commands }) as { ok: boolean };

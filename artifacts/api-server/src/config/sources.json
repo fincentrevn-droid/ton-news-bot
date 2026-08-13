@@ -1,25 +1,30 @@
 {
   "primary_sources": [
-    { "name": "TON Blockchain", "url": "@ton_blockchain", "type": "telegram_channel", "category": "TON" },
-    { "name": "Durov", "url": "@durov", "type": "telegram_channel", "category": "Telegram" },
-    { "name": "Telegram", "url": "@telegram", "type": "telegram_channel", "category": "Telegram" },
-    { "name": "TON Community", "url": "@toncoin", "type": "telegram_channel", "category": "TON" },
-    { "name": "TON Foundation", "url": "@the_open_network", "type": "telegram_channel", "category": "TON" }
+    { "name": "Державна податкова служба", "url": "@tax_gov_ua", "type": "telegram_channel", "category": "Податки" },
+    { "name": "Національний банк України", "url": "@nbu_ua", "type": "telegram_channel", "category": "Економіка" },
+    { "name": "Міністерство економіки України", "url": "@mineconomdevUA", "type": "telegram_channel", "category": "Бізнес" },
+    { "name": "Міністерство фінансів України", "url": "@MOF_ua", "type": "telegram_channel", "category": "Фінанси" },
+    { "name": "Уряд online", "url": "@uriad24", "type": "telegram_channel", "category": "Регулювання" },
+    { "name": "Дія", "url": "@diia_gov", "type": "telegram_channel", "category": "Держпослуги" }
   ],
   "secondary_sources": [
-    { "name": "CoinTelegraph", "url": "https://cointelegraph.com/rss", "type": "rss", "category": "crypto" },
-    { "name": "Decrypt", "url": "https://decrypt.co/feed", "type": "rss", "category": "crypto" },
-    { "name": "The Block", "url": "https://www.theblock.co/rss.xml", "type": "rss", "category": "crypto" }
+    { "name": "Економічна правда", "url": "@epravda", "type": "telegram_channel", "category": "Бізнес-медіа" },
+    { "name": "Forbes Ukraine", "url": "@Forbes_Ukraine_official", "type": "telegram_channel", "category": "Бізнес-медіа" },
+    { "name": "Опендатамедіа", "url": "@OpendatabotChannel", "type": "telegram_channel", "category": "Бізнес-дані" },
+    { "name": "European Central Bank", "url": "https://www.ecb.europa.eu/rss/press.html", "type": "rss", "category": "Світова економіка" },
+    { "name": "Federal Reserve Monetary Policy", "url": "https://www.federalreserve.gov/feeds/press_monetary.xml", "type": "rss", "category": "Світова економіка" }
   ],
   "keywords": [
-    "TON", "The Open Network", "Telegram Gifts", "Gifts", "Stars", "Fragment",
-    "Durov", "Telegram Wallet", "NFT", "collectible gifts", "Telegram crypto",
-    "Telegram mini apps", "BTC", "ETH", "Bitcoin", "Ethereum", "crypto market",
-    "airdrop", "ETF", "DeFi", "stablecoin", "exchange", "hack", "regulation",
-    "SEC", "CFTC", "Layer 2", "L2", "zkEVM", "Solana", "Toncoin"
+    "ФОП", "ТОВ", "податки", "ПДВ", "ЄСВ", "звітність", "ліцензії",
+    "бізнес", "підприємці", "експорт", "імпорт", "митниця", "гранти",
+    "кредитування", "інвестиції", "ринок праці", "бронювання", "регулювання",
+    "економіка", "ВВП", "інфляція", "облікова ставка", "курс гривні",
+    "бюджет", "торгівля", "логістика", "енергетика", "санкції",
+    "business", "economy", "inflation", "interest rate", "monetary policy",
+    "trade", "tariff", "investment", "recession", "supply chain"
   ],
   "blocked_domains": [
     "bit.ly", "tinyurl.com", "freeclaim", "wallet-connect",
-    "connect-wallet", "airdrop", "claim"
+    "connect-wallet", "airdrop", "claim", "casino", "bet"
   ]
 }
