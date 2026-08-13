@@ -3,8 +3,10 @@ import { db, postsTable, sourcesTable, aiUsageTable, settingsTable } from "@work
 import { eq, and, gte, sql } from "drizzle-orm";
 import { getOrCreateTodayUsage, getSettings } from "../lib/openai";
 import { getChannelStats, isTelegramReaderAvailable } from "../lib/telegram-reader";
+import { getContentProfile } from "../config/content-profile";
 
 const router = Router();
+const contentProfile = getContentProfile();
 
 router.get("/stats/dashboard", async (_req, res): Promise<void> => {
   const todayStart = new Date();
@@ -49,6 +51,10 @@ router.get("/stats/dashboard", async (_req, res): Promise<void> => {
   const currentModel = process.env.OPENAI_MODEL ?? settings.openaiModel;
 
   res.json({
+    contentProfile: contentProfile.id,
+    channelName: contentProfile.channelName,
+    channelSubtitle: contentProfile.dashboardSubtitle,
+    channelSignature: contentProfile.channelSignature,
     totalPosts: Number(allPosts[0]?.count ?? 0),
     publishedToday: Number(publishedToday[0]?.count ?? 0),
     drafts: Number(drafts[0]?.count ?? 0),
