@@ -1,6 +1,10 @@
-# TON News Bot
+# Multi-Profile Telegram News Bot
 
-Automated Telegram crypto-news channel for the TON/Telegram ecosystem. Generates AI-written posts in Russian via OpenAI, runs a safety filter, sends posts for review via Telegram inline buttons, and publishes to a Telegram channel.
+Automated Telegram news bot with isolated `business` and `crypto` content profiles. Each Railway service selects its own prompts, filters, sources, signature and branding through `CONTENT_PROFILE` and must use a separate PostgreSQL database.
+
+- Business setup: copy `.env.example` and use `CONTENT_PROFILE=business`.
+- Crypto setup: copy `.env.crypto.example` and follow [SECOND_CHANNEL_SETUP.md](SECOND_CHANNEL_SETUP.md).
+- Never reuse `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET` or `BOT_INSTANCE_ID` between channel services.
 
 ---
 

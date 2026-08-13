@@ -1,3 +1,7 @@
+import { getContentProfile } from "../config/content-profile";
+
+const contentProfile = getContentProfile();
+
 const BUSINESS_KEYWORDS = [
   // Ukraine: business, taxes and regulation
   "бізнес", "підприєм", "фоп", "тов", "подат", "пдв", "єсв", "акциз",
@@ -23,14 +27,26 @@ const BUSINESS_KEYWORDS = [
   "energy", "oil", "gas", "commodity", "regulation", "tax", "customs",
 ];
 
-const HARD_BLOCK_PATTERNS = [
+const CRYPTO_KEYWORDS = [
+  "bitcoin", "btc", "ethereum", "eth", "solana", "toncoin", "ton ",
+  "crypto", "blockchain", "defi", "nft", "web3", "stablecoin", "airdrop",
+  "exchange", "binance", "coinbase", "telegram", "wallet", "token",
+  "биткоин", "биткойн", "эфириум", "эфир", "солана", "тонкоин",
+  "крипто", "блокчейн", "стейблкоин", "токен", "биржа", "кошелек",
+  "телеграм", "павел дуров", "дуров", "майнинг", "майнер", "ликвидност",
+  "комисси", "листинг", "делистинг", "etf", "sec", "фрс", "ставк",
+];
+
+const COMMON_HARD_BLOCK_PATTERNS = [
+  /(футбол|баскетбол|теннис|теніс|\bufc\b|чемпионат|чемпіонат|спортсмен|матч|гол у ворота)/iu,
+  /(шоу-бизнес|шоу-бізнес|гороскоп|сериал|серіал|кинотеатр|кінотеатр|премьера фильма|прем'єра фільму|звездная свадьба|зіркове весілля)/iu,
+  /(убийство|вбивство|ограбление|пограбування|дтп|криминальная хроника|кримінальна хроніка)/iu,
+];
+
+const BUSINESS_HARD_BLOCK_PATTERNS = [
   // The repurposed channel is not a crypto channel.
   /\b(bitcoin|ethereum|toncoin|memecoin|airdrop|blockchain|crypto|defi|nft)\b/i,
   /(біткоїн|біткойн|ефіріум|тонкоїн|криптовалют|крипторин|криптоактив|аірдроп)/iu,
-  // Topics that do not belong in a business/economy feed.
-  /(футбол|баскетбол|теніс|\bufc\b|чемпіонат|спортсмен|матч|гол у ворота)/iu,
-  /(шоу-бізнес|гороскоп|серіал|кінотеатр|прем'єра фільму|зіркове весілля)/iu,
-  /(вбивство|пограбування|дтп|кримінальна хроніка)/iu,
 ];
 
 const PROMO_PATTERNS = [
@@ -41,14 +57,17 @@ const PROMO_PATTERNS = [
 
 export function scoreBusinessRelevance(text: string): number {
   const normalized = text.toLowerCase();
-  return BUSINESS_KEYWORDS.reduce(
+  const keywords = contentProfile.id === "crypto" ? CRYPTO_KEYWORDS : BUSINESS_KEYWORDS;
+  return keywords.reduce(
     (score, keyword) => score + (normalized.includes(keyword) ? 1 : 0),
     0,
   );
 }
 
 export function isHardBlockedSource(text: string): boolean {
-  return [...HARD_BLOCK_PATTERNS, ...PROMO_PATTERNS].some((pattern) => pattern.test(text));
+  const profileBlocks = contentProfile.id === "business" ? BUSINESS_HARD_BLOCK_PATTERNS : [];
+  return [...COMMON_HARD_BLOCK_PATTERNS, ...profileBlocks, ...PROMO_PATTERNS]
+    .some((pattern) => pattern.test(text));
 }
 
 /**
@@ -56,6 +75,7 @@ export function isHardBlockedSource(text: string): boolean {
  * They remain eligible only when the configured source is marked as primary.
  */
 export function hasHighRiskRegulatoryClaim(text: string): boolean {
+  if (contentProfile.id === "crypto") return false;
   return /(подат\p{L}*|пдв|єсв|акциз\p{L}*|декларац\p{L}*|звітн\p{L}*|штраф\p{L}*|пен[іяі]\p{L}*|закон\p{L}*|законопроєкт\p{L}*|постанова\p{L}*|наказ\p{L}*|ліценз\p{L}*|дозвіл\p{L}*|митн\p{L}*|мито|тариф\p{L}*|бронюван\p{L}*|обов'яз\p{L}*|набуває чинності|граничн\p{L}* строк\p{L}*)/iu.test(text);
 }
 

@@ -1,252 +1,139 @@
-# Setting Up a Second Independent Channel
+# Второй независимый крипто-канал
 
-This guide explains how to run a **second, fully independent** Telegram channel bot based on the TONKOFF codebase without touching or risking the existing TONKOFF deployment.
+Проект поддерживает два изолированных профиля из одного проверенного кода:
 
----
+| Профиль | `CONTENT_PROFILE` | Язык и тема | Подпись по умолчанию |
+|---|---|---|---|
+| ЦФЮК \| Бізнес | `business` | украинский, бизнес и экономика | `@fincentre_business` |
+| TONKOFF | `crypto` | русский, крипторынок, TON и Telegram | `@tonkoff_crypto` |
 
-## What "Independent" Means
+Профили используют разные промты, фильтры, источники, подписи и настройки. Для полной операционной изоляции второй профиль запускается отдельным Railway-сервисом с отдельной базой данных.
 
-Each channel must have its own:
+## Что уже подготовлено для crypto-профиля
 
-| Resource | Why separate |
+- отдельный русскоязычный промт и проверка качества;
+- отдельный крипто-фильтр, который не блокирует Bitcoin, TON, Telegram и Web3;
+- отдельный стартовый список официальных и тематических источников;
+- подпись и название канала через переменные окружения;
+- динамическое название панели управления;
+- стартовый график 6-8 постов в день;
+- ручное подтверждение и выключенное расписание при первом запуске;
+- защита базы: сервис не запустится, если случайно подключить его к базе другого бота.
+
+## Что обязательно должно быть отдельным
+
+| Ресурс | Требование |
 |---|---|
-| GitHub fork / repo copy | Code changes don't bleed into TONKOFF |
-| Replit project | Separate dev environment |
-| Railway project | Separate deployment, logs, restarts |
-| PostgreSQL database | Posts, sources, schedules don't mix |
-| Telegram Bot (`@BotFather`) | Separate token, separate bot identity |
-| `TELEGRAM_CHANNEL_ID` | Publishes to a different channel |
-| Telegram Reader account | Different session file, different reader identity |
-| Environment variables | All secrets isolated in the new Railway project |
+| Railway service | Новый сервис для crypto-профиля |
+| PostgreSQL | Новая база, не база ЦФЮК |
+| `BOT_INSTANCE_ID` | Уникальное значение `tonkoff-crypto` |
+| `TELEGRAM_BOT_TOKEN` | Новый бот из `@BotFather` |
+| `TELEGRAM_CHANNEL_ID` | Крипто-канал |
+| `SESSION_SECRET` | Новая случайная строка |
+| `TELEGRAM_STRING_SESSION` | Желательно отдельный Telegram reader |
 
-You **can** keep the same owner values if you want review/admin messages to come to you personally:
+`OPENAI_API_KEY`, `OWNER_TELEGRAM_ID` и `REVIEW_CHAT_ID` технически можно использовать одинаковые. Для независимого контроля расходов лучше создать отдельный OpenAI API key.
 
-```
-REVIEW_CHAT_ID=312695586
-OWNER_TELEGRAM_ID=312695586
-```
+## 1. Подготовить Telegram
 
-You **can** share the same `OPENAI_API_KEY` (usage is tracked per deployment via `ai_usage` table), or use a separate one.
+1. Создать нового бота через `@BotFather`.
+2. Добавить его администратором в крипто-канал.
+3. Разрешить публикацию, редактирование и удаление сообщений.
+4. Подготовить отдельный reader-аккаунт Telegram и получить:
+   - `TELEGRAM_API_ID`;
+   - `TELEGRAM_API_HASH`;
+   - `TELEGRAM_STRING_SESSION` через `generate_session.py`.
 
----
+Не отправляйте токены и session string в чат и не сохраняйте их в GitHub.
 
-## Step 1 — Fork / Duplicate the GitHub Repo
+## 2. Создать второй Railway-сервис
 
-### Option A: GitHub Fork (recommended for independent development)
+1. В существующем Railway project нажать **New Service → GitHub Repo**.
+2. Выбрать тот же репозиторий `fincentrevn-droid/ton-news-bot` и ветку `main`.
+3. Назвать сервис, например `tonkoff-crypto-bot`.
+4. Добавить для него **новый PostgreSQL**.
+5. Привязать к crypto-сервису `DATABASE_URL` именно новой базы.
 
-1. Go to `https://github.com/fincentrevn-droid/ton-news-bot`
-2. Click **Fork** → choose a new name, e.g. `my-second-channel-bot`
-3. Make the fork **private** if you don't want the config public
+Нельзя копировать `DATABASE_URL` бизнес-бота. В коде есть дополнительная проверка: при совпадении базы запуск будет остановлен до публикации.
 
-### Option B: Duplicate (no fork relationship)
+## 3. Добавить переменные
 
-```bash
-git clone https://github.com/fincentrevn-droid/ton-news-bot my-second-channel-bot
-cd my-second-channel-bot
-git remote set-url origin https://github.com/YOUR_USERNAME/my-second-channel-bot
-git push -u origin main
-```
-
-> **Do not push to `fincentrevn-droid/ton-news-bot`** from the second channel repo.
-
----
-
-## Step 2 — Create a New Replit Project
-
-1. Go to [replit.com](https://replit.com) → **Create Repl** → **Import from GitHub**
-2. Select your forked/duplicated repo
-3. This is now a completely separate Replit project — changes here don't affect TONKOFF's Replit
-
-You do **not** need to run the second channel from Replit long-term — Replit is just the dev/edit environment. Production runs on Railway.
-
----
-
-## Step 3 — Create a New Telegram Bot
-
-1. Open `@BotFather` in Telegram → `/newbot`
-2. Give it a new name and username (e.g. `@mychannel_autobot`)
-3. Copy the **bot token** — this is the new `TELEGRAM_BOT_TOKEN`
-4. Add the new bot as **Administrator** to your new Telegram channel
-5. Grant it: **Post Messages**, **Edit Messages**, **Delete Messages**
-
-> **Never share** the new bot token with TONKOFF's Railway project.
-
----
-
-## Step 4 — Create a New Telegram Reader Account
-
-The reader account is a **separate Telegram account** (not your main one) used only to read source channels via Telethon.
-
-1. Register a new phone number (or use an existing secondary Telegram account)
-2. Get `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org) for that account
-3. Run `python3 generate_session.py` from the repo root to generate `TELEGRAM_STRING_SESSION`
-4. Keep this session string **private and separate** — never use TONKOFF's session in the new bot
-
----
-
-## Step 5 — Create a New Railway Project
-
-1. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**
-2. Select your forked/duplicated repo
-3. Add a **PostgreSQL** plugin inside this project (Railway → Add Plugin → PostgreSQL)
-4. `DATABASE_URL` will be set automatically by Railway
-
-> This is a **completely separate Railway project** from TONKOFF's. It has its own database, its own deploy pipeline, its own logs.
-
----
-
-## Step 6 — Set Environment Variables on Railway
-
-Set all of these in the new Railway project's **Variables** tab. **Do not copy from TONKOFF's Railway** — generate fresh values.
-
-### Required — must be different from TONKOFF
+Готовый шаблон находится в `.env.crypto.example`. В Railway нужно добавить:
 
 ```env
-TELEGRAM_BOT_TOKEN=          # new bot token from @BotFather
-TELEGRAM_CHANNEL_ID=         # new channel ID, e.g. @my_second_channel
-TELEGRAM_API_ID=             # from my.telegram.org for the reader account
-TELEGRAM_API_HASH=           # from my.telegram.org for the reader account
-TELEGRAM_STRING_SESSION=     # generated with generate_session.py for the reader account
-DATABASE_URL=                # set automatically by Railway PostgreSQL plugin
-SESSION_SECRET=              # generate a new random string: openssl rand -hex 32
-```
+CONTENT_PROFILE=crypto
+BOT_INSTANCE_ID=tonkoff-crypto
+CHANNEL_DISPLAY_NAME=TONKOFF
+CHANNEL_SUBTITLE=Автопостинг крипто-новостей в Telegram
+CHANNEL_SIGNATURE=@tonkoff_crypto
 
-### Optional — can reuse from TONKOFF or set fresh
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6-luna
 
-```env
-OPENAI_API_KEY=              # can share with TONKOFF or use a separate key
-REVIEW_CHAT_ID=312695586     # keep your personal ID if you want reviews sent to you
-OWNER_TELEGRAM_ID=312695586  # keep your personal ID for cost alerts
-```
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHANNEL_ID=@tonkoff_crypto
+OWNER_TELEGRAM_ID=
+REVIEW_CHAT_ID=
 
-### Copy as-is from `.env.example` (safe defaults)
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=
+TELEGRAM_STRING_SESSION=
 
-```env
-OPENAI_MODEL=gpt-4o
-AUTO_PUBLISH=true
-POSTING_REQUIRES_APPROVAL=false
-MIN_AUTO_POSTS_PER_DAY=6
-MAX_AUTO_POSTS_PER_DAY=8
-TARGET_AUTO_POSTS_PER_DAY=7
-POSTING_TIMEZONE=Europe/Kyiv
-POSTING_START_TIME=09:00
-POSTING_END_TIME=23:30
-NIGHT_PAUSE_ENABLED=true
-NIGHT_PAUSE_START=00:00
-NIGHT_PAUSE_END=08:30
-MIN_MINUTES_BETWEEN_POSTS=75
-MAX_MINUTES_BETWEEN_POSTS=180
-POSTING_RANDOM_DELAY_ENABLED=true
-POSTING_RANDOM_DELAY_MINUTES=25
-MAX_POSTS_PER_DAY=8
-MAX_AI_CALLS_PER_DAY=12
-MAX_REWRITE_PER_POST=3
-MAX_TOKENS_PER_POST=1500
-MAX_SOURCE_POSTS_PER_CHANNEL=20
-LOOKBACK_HOURS=24
-MAX_SOURCE_AGE_HOURS=48
-ENABLE_SECONDARY_SOURCES=false
-ENABLE_MEDIA_DOWNLOAD=false
-ENABLE_COST_GUARD=true
+DATABASE_URL=
+SESSION_SECRET=
+
+SCHEDULE_ENABLED=false
+AUTO_PUBLISH=false
+POSTING_REQUIRES_APPROVAL=true
+ENABLE_MEDIA_DOWNLOAD=true
+MAX_SOURCE_AGE_HOURS=24
 ENABLE_AI_QUALITY_CHECK=true
-QUALITY_CHECK_MIN_SCORE=85
-MAX_AUTO_QUALITY_REWRITES=1
-TELEGRAM_CUSTOM_EMOJI_ENABLED=true
-TELEGRAM_CUSTOM_EMOJI_FALLBACK=true
+QUALITY_CHECK_MIN_SCORE=90
 ```
 
----
+Остальные лимиты и график уже имеют безопасные значения crypto-профиля. При необходимости их можно скопировать из `.env.crypto.example` или изменить позже в панели.
 
-## Step 7 — Change Files for the Second Channel
+## 4. Первый безопасный запуск
 
-These are the only files you need to edit in your forked repo. **Do not edit any of these in the TONKOFF repo.**
+После успешного деплоя система автоматически:
 
-### 7a. Sources — `artifacts/api-server/src/config/sources.json`
+1. создаст таблицы в новой базе;
+2. закрепит базу за `tonkoff-crypto`;
+3. добавит только крипто-источники;
+4. создаст отдельную очередь, расписание и счётчик AI;
+5. зарегистрирует webhook нового Telegram-бота;
+6. оставит расписание и автопубликацию выключенными.
 
-Replace the TON-focused channels and keywords with your new channel's topic:
+Проверка перед включением:
 
-```json
-{
-  "primary_sources": [
-    { "name": "Source Name", "url": "@channel_username", "type": "telegram_channel", "category": "your-topic" }
-  ],
-  "secondary_sources": [
-    { "name": "RSS Source", "url": "https://example.com/rss", "type": "rss", "category": "your-topic" }
-  ],
-  "keywords": ["keyword1", "keyword2"],
-  "blocked_domains": ["bit.ly", "tinyurl.com", "freeclaim", "wallet-connect", "connect-wallet", "airdrop", "claim"]
-}
-```
+- открыть dashboard crypto-сервиса и убедиться, что в заголовке указан TONKOFF;
+- в **News Sources** должны быть только крипто-источники;
+- нажать **Generate Now** один раз;
+- проверить язык, стиль, подпись и изображение в review-сообщении;
+- утвердить 3-5 тестовых постов вручную;
+- только после этого включить расписание, затем отдельно Auto-publish.
 
-### 7b. Writing style prompt — `artifacts/api-server/src/lib/openai.ts`
+## Как обеспечена независимость
 
-Three prompts reference the TONKOFF channel name and TON/crypto topic. Update all three for the new channel:
-
-| Constant | Line (approx.) | What to change |
+| Что происходит | Бизнес-бот | Крипто-бот |
 |---|---|---|
-| `SOURCE_SYSTEM_PROMPT` | ~67 | Channel name, topic, writing style |
-| `FREE_SYSTEM_PROMPT` | ~109 | Channel name, topic, writing style |
-| `QUALITY_CHECK_SYSTEM_PROMPT` | ~433 | Channel name and topic for the QC reviewer |
+| Источники | собственная база | собственная база |
+| Очередь и история | не видит crypto | не видит business |
+| Telegram-публикация | свой token/channel | свой token/channel |
+| Промт и язык | business/UA | crypto/RU |
+| AI-лимиты | свой счётчик | свой счётчик |
+| Расписание | собственное | собственное |
+| Ошибка конфигурации базы | запуск остановится | запуск остановится |
 
-Example — replace:
-```
-Ты автор Telegram-канала TONKOFF о TON, Telegram-крипте и крипторынке.
-```
-With:
-```
-Ты автор Telegram-канала [NEW_CHANNEL_NAME] о [YOUR_TOPIC].
-```
+Оба сервиса используют общий код из `main`, поэтому исправления безопасности можно устанавливать один раз. При этом данные, публикации и контентные правила не пересекаются.
 
-Keep the rest of the prompt structure intact (rules, formatting, forbidden phrases) or adapt for your niche.
+## Перед окончательной настройкой стиля
 
----
+Нужно подтвердить четыре значения:
 
-## Step 8 — Register the Webhook on Railway
+1. точное название крипто-канала;
+2. его `@username` для подписи;
+3. желаемое количество постов в день;
+4. финальный стиль: насколько допустимы юмор, авторский комментарий и рыночная оценка.
 
-After the first deploy, register the Telegram webhook so the bot receives button callbacks:
-
-```
-POST https://api.telegram.org/bot<NEW_BOT_TOKEN>/setWebhook
-  url: https://<your-railway-domain>/api/telegram/webhook
-```
-
-Railway provides the public domain under **Settings → Domains** in your new project.
-
----
-
-## What Must Never Be Shared Between TONKOFF and the Second Channel
-
-| Thing | Why |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Each bot is a separate Telegram identity |
-| `TELEGRAM_CHANNEL_ID` | Posts go to the right channel |
-| `TELEGRAM_STRING_SESSION` | Each reader account has its own session |
-| `DATABASE_URL` | Posts, drafts, sources, AI usage stay separate |
-| `SESSION_SECRET` | Dashboard cookie signing is isolated |
-| Railway project | Deployments, logs, restarts don't interfere |
-| Replit project | Dev environments don't share workflows |
-
----
-
-## Checklist Before Going Live
-
-- [ ] New GitHub repo forked / duplicated
-- [ ] New Replit project created from the new repo
-- [ ] New Railway project created with PostgreSQL plugin
-- [ ] All required env vars set in the new Railway project
-- [ ] `sources.json` updated for the new channel topic
-- [ ] Prompts in `openai.ts` updated to reference the new channel name/topic
-- [ ] New Telegram bot created via @BotFather, added as admin to the new channel
-- [ ] New reader Telegram account session generated and saved to `TELEGRAM_STRING_SESSION`
-- [ ] Webhook registered at `https://<new-railway-domain>/api/telegram/webhook`
-- [ ] Test: `/generate_now` via Telegram bot → post appears in review or auto-publishes
-- [ ] TONKOFF Railway project is untouched and still running normally
-
----
-
-## Notes
-
-- The TONKOFF Railway project, database, and bot are completely unaffected by anything you do in the second project.
-- Both bots can run simultaneously — they use different tokens and databases.
-- If you want review messages from both bots to arrive in the same Telegram chat, set `REVIEW_CHAT_ID` to the same value in both projects. The messages will be distinguishable by the source channel name shown in each review caption.
-- Never commit `.env` files or session strings to Git.
+До подтверждения профиль использует безопасный вариант: коротко, живо, только по фактам, без торговых советов и рекламы.

@@ -3,7 +3,7 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: Fincentre Business News Bot API specification
+  description: Multi-Profile Telegram News Bot API specification
 servers:
   - url: /api
     description: Base API path
@@ -655,8 +655,17 @@ components:
 
     DashboardStats:
       type: object
-      required: [totalPosts, publishedToday, drafts, aiCallsToday, aiCallsLimit, sourcesCount, pendingReview, safetyRejected, autoPublish, postingRequiresApproval, currentModel, secondarySourcesEnabled, telegramSourcesCount]
+      required: [contentProfile, channelName, channelSubtitle, channelSignature, totalPosts, publishedToday, drafts, aiCallsToday, aiCallsLimit, sourcesCount, pendingReview, safetyRejected, autoPublish, postingRequiresApproval, currentModel, secondarySourcesEnabled, telegramSourcesCount]
       properties:
+        contentProfile:
+          type: string
+          enum: [business, crypto]
+        channelName:
+          type: string
+        channelSubtitle:
+          type: string
+        channelSignature:
+          type: string
         totalPosts:
           type: integer
         publishedToday:

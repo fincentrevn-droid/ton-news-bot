@@ -7,8 +7,10 @@ import { checkSafety, cleanContent } from "../lib/safety";
 import { isInActiveWindow } from "../lib/scheduler";
 import { generateAndQueuePost } from "../lib/auto-generate";
 import { logger } from "../lib/logger";
+import { getContentProfile } from "../config/content-profile";
 
 const router = Router();
+const contentProfile = getContentProfile();
 
 interface TelegramUser {
   id: number;
@@ -180,8 +182,8 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
 
   if (text.startsWith("/start")) {
     const msg =
-      `👋 <b>ЦФЮК | Бізнес News Bot</b>\n\n` +
-      `Автопостинг перевірених новин про бізнес та економіку.\n\n` +
+      `👋 <b>${contentProfile.channelName} News Bot</b>\n\n` +
+      `${contentProfile.botDescription}\n\n` +
       `<b>Команди:</b>\n` +
       `/status — статус публікацій та AI-викликів\n` +
       `/generate_now — перевірити джерела зараз\n` +

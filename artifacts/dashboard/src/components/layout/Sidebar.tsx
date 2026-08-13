@@ -8,6 +8,8 @@ import {
   Activity 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useGetDashboardStats } from "@workspace/api-client-react";
+import { useEffect } from "react";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -20,6 +22,27 @@ const navigation = [
 
 export function Sidebar() {
   const [location] = useLocation();
+  const { data: stats } = useGetDashboardStats();
+
+  useEffect(() => {
+    if (!stats) return;
+
+    const title = `${stats.channelName} — автопостинг`;
+    const description = `${stats.channelSubtitle}. Канал ${stats.channelSignature}.`;
+    document.title = title;
+
+    const metadata: Record<string, string> = {
+      "meta[name='description']": description,
+      "meta[property='og:title']": title,
+      "meta[property='og:description']": description,
+      "meta[name='twitter:title']": title,
+      "meta[name='twitter:description']": description,
+    };
+
+    for (const [selector, content] of Object.entries(metadata)) {
+      document.querySelector<HTMLMetaElement>(selector)?.setAttribute("content", content);
+    }
+  }, [stats]);
 
   return (
     <div className="flex h-full w-64 flex-col border-r border-border bg-sidebar px-4 py-6">
@@ -28,8 +51,8 @@ export function Sidebar() {
           <Activity className="h-5 w-5 text-primary-foreground" />
         </div>
         <div className="flex flex-col">
-          <span className="text-sm font-bold text-foreground leading-tight">ЦФЮК | Бізнес</span>
-          <span className="text-xs text-muted-foreground leading-tight">Автопостинг новин</span>
+          <span className="text-sm font-bold text-foreground leading-tight">{stats?.channelName ?? "News Bot"}</span>
+          <span className="text-xs text-muted-foreground leading-tight">{stats?.channelSignature ?? "Автопостинг новин"}</span>
         </div>
       </div>
 
