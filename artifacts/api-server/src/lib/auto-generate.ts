@@ -22,6 +22,21 @@ export type NotifyFn = (msg: string) => Promise<void>;
 
 const silentNotify: NotifyFn = async (_msg) => { /* no-op */ };
 
+// Do not spend AI calls on the same source after the model has already
+// rejected it. The cache lives for one source-freshness window and is reset
+// naturally when the service restarts.
+const AI_REJECTION_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_SOURCE_ATTEMPTS_PER_RUN = 3;
+const aiRejectedSourceHashes = new Map<string, number>();
+
+function wasRecentlyRejectedByAi(hash: string): boolean {
+  const rejectedAt = aiRejectedSourceHashes.get(hash);
+  if (!rejectedAt) return false;
+  if (Date.now() - rejectedAt < AI_REJECTION_TTL_MS) return true;
+  aiRejectedSourceHashes.delete(hash);
+  return false;
+}
+
 /** Quality gate for auto-publish routing (webhook + scheduler share this). */
 export function qualifiesForAutoPublish(opts: {
   confidence: string;
@@ -85,6 +100,7 @@ export async function generateAndQueuePost(
   const candidates = sourcePosts.filter(
     (p) =>
       !usedHashes.has(p.textHash) &&
+      !wasRecentlyRejectedByAi(p.textHash) &&
       !recentPreviews.some((preview) => areLikelyDuplicate(p.fullText, preview)),
   );
   if (candidates.length === 0) {
@@ -98,7 +114,7 @@ export async function generateAndQueuePost(
   let candidate = candidates[0];
   const skippedHashes = new Set<string>();
 
-  for (let attempt = 0; attempt < Math.min(candidates.length, 5); attempt++) {
+  for (let attempt = 0; attempt < Math.min(candidates.length, MAX_SOURCE_ATTEMPTS_PER_RUN); attempt++) {
     const pick = candidates.find((p) => !skippedHashes.has(p.textHash)) ?? candidates[0];
     candidate = pick;
 
@@ -124,6 +140,7 @@ export async function generateAndQueuePost(
       if (err instanceof Error && err.message === "NO_POST") {
         logger.info({ channel: candidate.channel }, "Source returned NO_POST — trying next");
         skippedHashes.add(candidate.textHash);
+        aiRejectedSourceHashes.set(candidate.textHash, Date.now());
         continue;
       }
       throw err;
