@@ -243,18 +243,13 @@ export async function fetchSourcePosts(): Promise<SourcePost[]> {
     return [];
   }
 
-  // Official primary sources get the strongest boost; trusted media remain eligible.
-  const boosted = all.map((p) =>
-    p.isPrimarySource
-      ? { ...p, relevanceScore: p.relevanceScore + 5 }
-      : p.channelUrl.startsWith("@")
-        ? { ...p, relevanceScore: p.relevanceScore + 2 }
-      : p,
-  );
-
-  const sorted = boosted.sort(
+  // Rank by actual business relevance first. Primary status is a trust signal
+  // for regulatory claims, not a reason for a low-value ceremonial post to
+  // outrank a concrete business story from trusted media.
+  const sorted = all.sort(
     (a, b) =>
       b.relevanceScore - a.relevanceScore ||
+      Number(Boolean(b.isPrimarySource)) - Number(Boolean(a.isPrimarySource)) ||
       b.pubDate.getTime() - a.pubDate.getTime(),
   );
 
