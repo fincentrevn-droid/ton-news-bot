@@ -1,19 +1,257 @@
-import { pgTable, text, serial, timestamp, boolean } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
+import { createHash } from "crypto";
+import { db, sourcesTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
+import { logger } from "./logger";
+import { fetchTelegramChannelPosts, isTelegramReaderAvailable } from "./telegram-reader";
+import {
+  hasHighRiskRegulatoryClaim,
+  isHardBlockedSource,
+  MIN_BUSINESS_RELEVANCE_SCORE,
+  scoreBusinessRelevance,
+} from "./business-filter";
 
-export const sourcesTable = pgTable("sources", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  url: text("url").notNull(),
-  type: text("type").notNull().default("rss"),
-  isPrimary: boolean("is_primary").notNull().default(false),
-  enabled: boolean("enabled").notNull().default(true),
-  category: text("category"),
-  lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export interface SourcePost {
+  title: string;
+  description: string;
+  fullText: string;
+  link: string;
+  pubDate: Date;
+  channel: string;
+  channelUrl: string;
+  textHash: string;
+  preview: string;
+  relevanceScore: number;
+  isPrimarySource?: boolean;
+  // Media extracted from source (Telegram posts only)
+  mediaType?: "photo" | "none";
+  mediaBuffer?: Buffer;
+}
 
-export const insertSourceSchema = createInsertSchema(sourcesTable).omit({ id: true, createdAt: true });
-export type InsertSource = z.infer<typeof insertSourceSchema>;
-export type Source = typeof sourcesTable.$inferSelect;
+function extractTag(xml: string, tag: string): string {
+  const pattern = new RegExp(
+    `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
+    "i",
+  );
+  const match = xml.match(pattern);
+  if (!match) return "";
+  let val = match[1].trim();
+  val = val.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").trim();
+  return val;
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractLink(itemXml: string): string {
+  const standard = extractTag(itemXml, "link");
+  if (standard) return standard.trim().replace(/\s+/g, "");
+  const atomMatch = itemXml.match(/<link[^>]+href=["']([^"']+)["']/i);
+  return atomMatch?.[1] ?? "";
+}
+
+function parseItems(
+  xml: string,
+  sourceName: string,
+  sourceUrl: string,
+  isPrimarySource = false,
+): Omit<SourcePost, "relevanceScore">[] {
+  const items: Omit<SourcePost, "relevanceScore">[] = [];
+  const matches = xml.matchAll(/<item[^>]*>([\s\S]*?)<\/item>/gi);
+
+  for (const [, itemXml] of matches) {
+    const title = stripHtml(extractTag(itemXml, "title"));
+    const rawDesc =
+      extractTag(itemXml, "content:encoded") ||
+      extractTag(itemXml, "description");
+    const description = stripHtml(rawDesc).slice(0, 800);
+    const link = extractLink(itemXml);
+    const pubDateStr =
+      extractTag(itemXml, "pubDate") || extractTag(itemXml, "dc:date");
+
+    if (!title && !description) continue;
+
+    const pubDate = pubDateStr ? new Date(pubDateStr) : new Date();
+    if (isNaN(pubDate.getTime())) continue;
+
+    const fullText = [title, description].filter(Boolean).join("\n\n");
+    const textHash = createHash("sha256")
+      .update(fullText.slice(0, 500))
+      .digest("hex")
+      .slice(0, 16);
+    const preview = fullText.slice(0, 450);
+
+    items.push({
+      title,
+      description,
+      fullText,
+      link,
+      pubDate,
+      channel: sourceName,
+      channelUrl: sourceUrl,
+      textHash,
+      preview,
+      isPrimarySource,
+    });
+  }
+
+  return items;
+}
+
+function scoreRelevance(post: Omit<SourcePost, "relevanceScore">): number {
+  return scoreBusinessRelevance(`${post.title} ${post.description}`);
+}
+
+async function fetchRssPosts(): Promise<SourcePost[]> {
+  // Secondary (RSS) sources are OFF by default — enabled only when ENABLE_SECONDARY_SOURCES=true
+  if (process.env.ENABLE_SECONDARY_SOURCES !== "true") return [];
+
+  const sources = await db
+    .select()
+    .from(sourcesTable)
+    .where(and(eq(sourcesTable.enabled, true), eq(sourcesTable.type, "rss")));
+
+  if (sources.length === 0) return [];
+
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  const all: SourcePost[] = [];
+
+  const results = await Promise.allSettled(
+    sources.map(async (src) => {
+      const res = await fetch(src.url, {
+        signal: AbortSignal.timeout(12_000),
+        headers: { "User-Agent": "FincentreBusinessBot/1.0 RSS Reader" },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const xml = await res.text();
+      return parseItems(xml, src.name, src.url, src.isPrimary);
+    }),
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      for (const post of r.value) {
+        if (isHardBlockedSource(post.fullText)) continue;
+        if (!post.isPrimarySource && hasHighRiskRegulatoryClaim(post.fullText)) continue;
+        all.push({ ...post, relevanceScore: scoreRelevance(post) });
+      }
+    } else {
+      logger.warn({ err: r.reason, source: sources[i].name }, "RSS fetch failed");
+    }
+  }
+
+  return all.filter(
+    (p) =>
+      p.relevanceScore >= (p.isPrimarySource ? 1 : MIN_BUSINESS_RELEVANCE_SCORE) &&
+      p.pubDate >= cutoff,
+  );
+}
+
+async function fetchTelegramPosts(): Promise<SourcePost[]> {
+  if (!isTelegramReaderAvailable()) return [];
+
+  const channels = await db
+    .select()
+    .from(sourcesTable)
+    .where(
+      and(
+        eq(sourcesTable.enabled, true),
+        eq(sourcesTable.type, "telegram_channel"),
+      ),
+    );
+
+  if (channels.length === 0) return [];
+
+  return fetchTelegramChannelPosts(
+    channels.map((c) => ({ name: c.name, url: c.url, isPrimary: c.isPrimary })),
+  );
+}
+
+export async function fetchSourcePosts(): Promise<SourcePost[]> {
+  const [rssPosts, tgPosts] = await Promise.allSettled([
+    fetchRssPosts(),
+    fetchTelegramPosts(),
+  ]);
+
+  if (rssPosts.status === "rejected") {
+    logger.warn({ err: rssPosts.reason }, "RSS fetch pipeline failed");
+  }
+  if (tgPosts.status === "rejected") {
+    logger.warn({ err: tgPosts.reason }, "Telegram channel fetch pipeline failed");
+  }
+
+  const tgList = tgPosts.status === "fulfilled" ? tgPosts.value : [];
+  const rssList = rssPosts.status === "fulfilled" ? rssPosts.value : [];
+
+  logger.info({ tgCount: tgList.length, rssCount: rssList.length }, "Source fetch results");
+
+  // If Telegram returned nothing and RSS is disabled, try RSS as emergency fallback
+  let emergencyRss: SourcePost[] = [];
+  if (tgList.length === 0 && process.env.ENABLE_SECONDARY_SOURCES !== "true") {
+    logger.warn("Telegram returned 0 posts — falling back to RSS as emergency source");
+    try {
+      const sources = await db
+        .select()
+        .from(sourcesTable)
+        .where(and(eq(sourcesTable.enabled, true), eq(sourcesTable.type, "rss")));
+      if (sources.length > 0) {
+        const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const results = await Promise.allSettled(
+          sources.map(async (src) => {
+            const res = await fetch(src.url, { signal: AbortSignal.timeout(12_000), headers: { "User-Agent": "FincentreBusinessBot/1.0 RSS Reader" } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const xml = await res.text();
+            return parseItems(xml, src.name, src.url, src.isPrimary);
+          }),
+        );
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            for (const p of r.value) {
+              if (isHardBlockedSource(p.fullText)) continue;
+              if (!p.isPrimarySource && hasHighRiskRegulatoryClaim(p.fullText)) continue;
+              const score = scoreRelevance(p);
+              if (
+                score >= (p.isPrimarySource ? 1 : MIN_BUSINESS_RELEVANCE_SCORE) &&
+                p.pubDate >= cutoff
+              ) {
+                emergencyRss.push({ ...p, relevanceScore: score });
+              }
+            }
+          }
+        }
+        logger.info({ count: emergencyRss.length }, "Emergency RSS fallback posts");
+      }
+    } catch (err) {
+      logger.warn({ err }, "Emergency RSS fallback failed");
+    }
+  }
+
+  const all: SourcePost[] = [...tgList, ...rssList, ...emergencyRss];
+
+  if (all.length === 0) {
+    logger.warn("No source posts found from any source");
+    return [];
+  }
+
+  // Rank by actual business relevance first. Primary status is a trust signal
+  // for regulatory claims, not a reason for a low-value ceremonial post to
+  // outrank a concrete business story from trusted media.
+  const sorted = all.sort(
+    (a, b) =>
+      b.relevanceScore - a.relevanceScore ||
+      Number(Boolean(b.isPrimarySource)) - Number(Boolean(a.isPrimarySource)) ||
+      b.pubDate.getTime() - a.pubDate.getTime(),
+  );
+
+  return sorted.slice(0, 15);
+}
