@@ -87,8 +87,17 @@ function passesAutoPublishQuality(post: {
 
 // ─── Auto-generation cooldown (in-memory, resets on restart) ─────────────────
 
-let lastAutoGenerateAttemptMs = 0;
+let nextAutoGenerateAttemptMs = 0;
 let autoGenerateInProgress = false;
+
+const configuredRetryMinutes = Number.parseInt(
+  process.env.AUTO_GENERATE_RETRY_MINUTES ?? "30",
+  10,
+);
+const AUTO_GENERATE_RETRY_MINUTES =
+  Number.isFinite(configuredRetryMinutes) && configuredRetryMinutes >= 5
+    ? configuredRetryMinutes
+    : 30;
 
 // ─── Main tick ───────────────────────────────────────────────────────────────
 
@@ -141,7 +150,10 @@ export async function tickPublisher(): Promise<void> {
 
     if (!post) {
       // Queue is empty — trigger auto-generation if cooldown has passed
-      await maybeAutoGenerate(schedule.minMinutesBetweenPosts);
+      await maybeAutoGenerate(
+        schedule.id,
+        schedule.minMinutesBetweenPosts,
+      );
       return;
     }
 
@@ -184,18 +196,19 @@ export async function tickPublisher(): Promise<void> {
  * Trigger a background post generation when the queue is empty.
  * Uses a per-process cooldown to avoid generating on every 2-min tick.
  */
-async function maybeAutoGenerate(minMinutesBetweenPosts: number): Promise<void> {
+async function maybeAutoGenerate(
+  scheduleId: number,
+  minMinutesBetweenPosts: number,
+): Promise<void> {
   if (autoGenerateInProgress) {
     logger.debug("Scheduler: generation already in progress — skipping");
     return;
   }
 
-  // Cooldown: wait at least minMinutesBetweenPosts between generation attempts
-  const cooldownMs = Math.max(minMinutesBetweenPosts, 75) * 60 * 1000;
-  const elapsed = Date.now() - lastAutoGenerateAttemptMs;
-  if (lastAutoGenerateAttemptMs > 0 && elapsed < cooldownMs) {
+  const now = Date.now();
+  if (nextAutoGenerateAttemptMs > now) {
     logger.debug(
-      { elapsedMin: Math.round(elapsed / 60000), cooldownMin: Math.round(cooldownMs / 60000) },
+      { retryInMin: Math.ceil((nextAutoGenerateAttemptMs - now) / 60000) },
       "Scheduler: generation cooldown active",
     );
     return;
@@ -215,20 +228,62 @@ async function maybeAutoGenerate(minMinutesBetweenPosts: number): Promise<void> 
     return;
   }
 
-  lastAutoGenerateAttemptMs = Date.now();
+  const startedAt = new Date();
   autoGenerateInProgress = true;
   logger.info("Scheduler: queue empty — triggering auto-generation");
 
   generateAndQueuePost(notifyOwner)
-    .then((result) => {
+    .then(async (result) => {
+      const cooldownMinutes = result
+        ? Math.max(minMinutesBetweenPosts, 75)
+        : AUTO_GENERATE_RETRY_MINUTES;
+      nextAutoGenerateAttemptMs = Date.now() + cooldownMinutes * 60 * 1000;
+
+      await db
+        .update(schedulesTable)
+        .set({
+          lastRunAt: startedAt,
+          nextRunAt: new Date(nextAutoGenerateAttemptMs),
+        })
+        .where(eq(schedulesTable.id, scheduleId));
+
       if (result) {
-        logger.info({ postId: result.postId, queued: result.queued, qc: result.qualityScore }, "Scheduler: auto-generation completed");
+        logger.info(
+          {
+            postId: result.postId,
+            queued: result.queued,
+            qc: result.qualityScore,
+            nextAttemptInMin: cooldownMinutes,
+          },
+          "Scheduler: auto-generation completed",
+        );
       } else {
-        logger.info("Scheduler: auto-generation returned no post (no sources or all NO_POST)");
+        logger.info(
+          { nextAttemptInMin: cooldownMinutes },
+          "Scheduler: auto-generation returned no post; short retry scheduled",
+        );
       }
     })
-    .catch((err) => {
-      logger.error({ err }, "Scheduler: auto-generation failed");
+    .catch(async (err) => {
+      nextAutoGenerateAttemptMs =
+        Date.now() + AUTO_GENERATE_RETRY_MINUTES * 60 * 1000;
+
+      try {
+        await db
+          .update(schedulesTable)
+          .set({
+            lastRunAt: startedAt,
+            nextRunAt: new Date(nextAutoGenerateAttemptMs),
+          })
+          .where(eq(schedulesTable.id, scheduleId));
+      } catch (scheduleErr) {
+        logger.error({ err: scheduleErr }, "Scheduler: failed to store retry time");
+      }
+
+      logger.error(
+        { err, nextAttemptInMin: AUTO_GENERATE_RETRY_MINUTES },
+        "Scheduler: auto-generation failed; short retry scheduled",
+      );
     })
     .finally(() => {
       autoGenerateInProgress = false;

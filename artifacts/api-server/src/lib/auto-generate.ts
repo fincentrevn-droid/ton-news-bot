@@ -26,8 +26,28 @@ const silentNotify: NotifyFn = async (_msg) => { /* no-op */ };
 // rejected it. The cache lives for one source-freshness window and is reset
 // naturally when the service restarts.
 const AI_REJECTION_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_SOURCE_ATTEMPTS_PER_RUN = 3;
+const MAX_SOURCE_ATTEMPTS_PER_RUN = 5;
 const aiRejectedSourceHashes = new Map<string, number>();
+
+/**
+ * Preserve relevance ranking while giving each source one opportunity before
+ * a second post from the same channel. This prevents one prolific channel
+ * from consuming the whole generation cycle.
+ */
+export function prioritizeSourceDiversity<T extends { channel: string }>(posts: T[]): T[] {
+  const firstByChannel = new Map<string, T>();
+  const remaining: T[] = [];
+
+  for (const post of posts) {
+    if (firstByChannel.has(post.channel)) {
+      remaining.push(post);
+    } else {
+      firstByChannel.set(post.channel, post);
+    }
+  }
+
+  return [...firstByChannel.values(), ...remaining];
+}
 
 function wasRecentlyRejectedByAi(hash: string): boolean {
   const rejectedAt = aiRejectedSourceHashes.get(hash);
@@ -97,11 +117,13 @@ export async function generateAndQueuePost(
     .map((r) => r.preview)
     .filter((preview): preview is string => Boolean(preview));
 
-  const candidates = sourcePosts.filter(
-    (p) =>
-      !usedHashes.has(p.textHash) &&
-      !wasRecentlyRejectedByAi(p.textHash) &&
-      !recentPreviews.some((preview) => areLikelyDuplicate(p.fullText, preview)),
+  const candidates = prioritizeSourceDiversity(
+    sourcePosts.filter(
+      (p) =>
+        !usedHashes.has(p.textHash) &&
+        !wasRecentlyRejectedByAi(p.textHash) &&
+        !recentPreviews.some((preview) => areLikelyDuplicate(p.fullText, preview)),
+    ),
   );
   if (candidates.length === 0) {
     await notify("ℹ️ Усі свіжі матеріали вже використані або повторюють опубліковані новини.");

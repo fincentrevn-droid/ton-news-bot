@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, settingsTable } from "@workspace/db";
+import { db, schedulesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { getSettings } from "../lib/openai";
@@ -7,8 +7,17 @@ import { getSettings } from "../lib/openai";
 const router = Router();
 
 router.get("/settings", async (_req, res): Promise<void> => {
-  const settings = await getSettings();
-  res.json(settings);
+  const [settings, scheduleRows] = await Promise.all([
+    getSettings(),
+    db.select().from(schedulesTable).limit(1),
+  ]);
+  const schedule = scheduleRows[0];
+
+  // The schedule table is authoritative for automatic publishing.
+  res.json({
+    ...settings,
+    autoPublish: schedule?.autoPublish ?? settings.autoPublish,
+  });
 });
 
 router.patch("/settings", async (req, res): Promise<void> => {
@@ -43,6 +52,20 @@ router.patch("/settings", async (req, res): Promise<void> => {
     .set(updateData)
     .where(eq(settingsTable.id, current.id))
     .returning();
+
+  if (d.autoPublish !== undefined) {
+    const [schedule] = await db.select().from(schedulesTable).limit(1);
+    if (schedule) {
+      await db
+        .update(schedulesTable)
+        .set({
+          autoPublish: d.autoPublish,
+          ...(d.autoPublish ? { enabled: true } : {}),
+        })
+        .where(eq(schedulesTable.id, schedule.id));
+    }
+  }
+
   res.json(updated);
 });
 
