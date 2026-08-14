@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { db, schedulesTable } from "@workspace/db";
+import { db, schedulesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { UpdateScheduleBody } from "@workspace/api-zod";
-import { checkAiLimitReached } from "../lib/openai";
+import { checkAiLimitReached, getSettings } from "../lib/openai";
 import { notifyOwner } from "../lib/telegram";
 import { generateAndQueuePost } from "../lib/auto-generate";
 
@@ -62,6 +62,15 @@ router.patch("/schedule", async (req, res): Promise<void> => {
     .set(updateData)
     .where(eq(schedulesTable.id, schedule.id))
     .returning();
+
+  if (d.autoPublish !== undefined) {
+    const settings = await getSettings();
+    await db
+      .update(settingsTable)
+      .set({ autoPublish: d.autoPublish })
+      .where(eq(settingsTable.id, settings.id));
+  }
+
   res.json(updated);
 });
 
