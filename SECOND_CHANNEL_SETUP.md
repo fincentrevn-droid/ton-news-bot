@@ -5,7 +5,7 @@
 | Профиль | `CONTENT_PROFILE` | Язык и тема | Подпись по умолчанию |
 |---|---|---|---|
 | ЦФЮК \| Бізнес | `business` | украинский, бизнес и экономика | `@fincentre_business` |
-| TONKOFF | `crypto` | русский, крипторынок, TON и Telegram | `@tonkoff_crypto` |
+| PANKOFF CRYPTO | `crypto` | русский, крипторынок, TON и Telegram | `@pankoff_crypto` |
 
 Профили используют разные промты, фильтры, источники, подписи и настройки. Для полной операционной изоляции второй профиль запускается отдельным Railway-сервисом с отдельной базой данных.
 
@@ -26,7 +26,7 @@
 |---|---|
 | Railway service | Новый сервис для crypto-профиля |
 | PostgreSQL | Новая база, не база ЦФЮК |
-| `BOT_INSTANCE_ID` | Уникальное значение `tonkoff-crypto` |
+| `BOT_INSTANCE_ID` | Уникальное значение `pankoff-crypto` |
 | `TELEGRAM_BOT_TOKEN` | Новый бот из `@BotFather` |
 | `TELEGRAM_CHANNEL_ID` | Крипто-канал |
 | `SESSION_SECRET` | Новая случайная строка |
@@ -50,7 +50,7 @@
 
 1. В существующем Railway project нажать **New Service → GitHub Repo**.
 2. Выбрать тот же репозиторий `fincentrevn-droid/ton-news-bot` и ветку `main`.
-3. Назвать сервис, например `tonkoff-crypto-bot`.
+3. Назвать сервис, например `pankoff-crypto-bot`.
 4. Добавить для него **новый PostgreSQL**.
 5. Привязать к crypto-сервису `DATABASE_URL` именно новой базы.
 
@@ -62,16 +62,16 @@
 
 ```env
 CONTENT_PROFILE=crypto
-BOT_INSTANCE_ID=tonkoff-crypto
-CHANNEL_DISPLAY_NAME=TONKOFF
+BOT_INSTANCE_ID=pankoff-crypto
+CHANNEL_DISPLAY_NAME=PANKOFF CRYPTO
 CHANNEL_SUBTITLE=Автопостинг крипто-новостей в Telegram
-CHANNEL_SIGNATURE=@tonkoff_crypto
+CHANNEL_SIGNATURE=@pankoff_crypto
 
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.6-luna
 
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHANNEL_ID=@tonkoff_crypto
+TELEGRAM_CHANNEL_ID=@pankoff_crypto
 OWNER_TELEGRAM_ID=
 REVIEW_CHAT_ID=
 
@@ -98,7 +98,7 @@ QUALITY_CHECK_MIN_SCORE=90
 После успешного деплоя система автоматически:
 
 1. создаст таблицы в новой базе;
-2. закрепит базу за `tonkoff-crypto`;
+2. закрепит базу за `pankoff-crypto`;
 3. добавит только крипто-источники;
 4. создаст отдельную очередь, расписание и счётчик AI;
 5. зарегистрирует webhook нового Telegram-бота;
@@ -106,7 +106,7 @@ QUALITY_CHECK_MIN_SCORE=90
 
 Проверка перед включением:
 
-- открыть dashboard crypto-сервиса и убедиться, что в заголовке указан TONKOFF;
+- открыть dashboard crypto-сервиса и убедиться, что в заголовке указан PANKOFF CRYPTO;
 - в **News Sources** должны быть только крипто-источники;
 - нажать **Generate Now** один раз;
 - проверить язык, стиль, подпись и изображение в review-сообщении;
