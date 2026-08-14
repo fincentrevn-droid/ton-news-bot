@@ -124,9 +124,9 @@ const PROFILE_DEFAULTS: Record<ContentProfileId, Omit<ContentProfile, "instanceK
   },
   crypto: {
     id: "crypto",
-    channelName: "TONKOFF",
+    channelName: "PANKOFF CRYPTO",
     dashboardSubtitle: "Автопостинг крипто-новостей в Telegram",
-    channelSignature: "@tonkoff_crypto",
+    channelSignature: "@pankoff_crypto",
     botDescription: "Автопостинг важных и интересных новостей о крипторынке, TON и Telegram.",
     defaultSources: CRYPTO_SOURCES,
     scheduleDefaults: {

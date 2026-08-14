@@ -70,9 +70,9 @@ Used for:
 
 ```
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHANNEL_ID=@tonkoff_crypto
-REVIEW_CHAT_ID=312695586      # your MAIN Telegram ID
-OWNER_TELEGRAM_ID=312695586   # your MAIN Telegram ID
+TELEGRAM_CHANNEL_ID=@pankoff_crypto
+REVIEW_CHAT_ID=123456789      # your MAIN Telegram ID
+OWNER_TELEGRAM_ID=123456789   # your MAIN Telegram ID
 ```
 
 ### 2. Telegram Reader account (read-only)
@@ -110,7 +110,7 @@ The `TELEGRAM_STRING_SESSION` lets the reader account read source channels via T
    - `@the_open_network` (TON Foundation)
 4. **Generate `TELEGRAM_STRING_SESSION`** using that reader account (steps below).
 5. **Paste `TELEGRAM_STRING_SESSION` into Railway** → Variables.
-6. **Keep `REVIEW_CHAT_ID` and `OWNER_TELEGRAM_ID` as your main owner ID** (`312695586`) — these stay on your main account.
+6. **Keep `REVIEW_CHAT_ID` and `OWNER_TELEGRAM_ID` as your main owner ID** (`123456789`) — these stay on your main account.
 
 ### Steps
 
