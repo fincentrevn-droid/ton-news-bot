@@ -17,6 +17,7 @@ import { fetchSourcePosts } from "./sources";
 import { checkSafety, cleanContent } from "./safety";
 import { logger } from "./logger";
 import { areLikelyDuplicate } from "./business-filter";
+import { getContentProfile } from "../config/content-profile";
 
 export type NotifyFn = (msg: string) => Promise<void>;
 
@@ -28,6 +29,7 @@ const silentNotify: NotifyFn = async (_msg) => { /* no-op */ };
 const AI_REJECTION_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_SOURCE_ATTEMPTS_PER_RUN = 5;
 const aiRejectedSourceHashes = new Map<string, number>();
+const contentProfile = getContentProfile();
 
 /**
  * Preserve relevance ranking while giving each source one opportunity before
@@ -105,26 +107,102 @@ export async function generateAndQueuePost(
     return null;
   }
 
-  // Avoid re-using source posts from the last 7 days
+  // Avoid re-using published source posts from the last 7 days. For the
+  // business profile, skipped posts are blocked by exact hash for only 24 hours:
+  // they must not poison approximate deduplication for an entire week.
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const recentSources = await db
-    .select({ hash: postsTable.sourceTextHash, preview: postsTable.sourcePreview })
-    .from(postsTable)
-    .where(and(gte(postsTable.createdAt, sevenDaysAgo), eq(postsTable.generatedFromSource, true)));
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  let recentSources: Array<{ hash: string | null; preview: string | null }>;
+  let recentlySkippedHashes = new Set<string>();
 
-  const usedHashes = new Set(recentSources.map((r) => r.hash).filter(Boolean));
+  if (contentProfile.id === "business") {
+    const [publishedSources, skippedSources] = await Promise.all([
+      db
+        .select({ hash: postsTable.sourceTextHash, preview: postsTable.sourcePreview })
+        .from(postsTable)
+        .where(
+          and(
+            gte(postsTable.createdAt, sevenDaysAgo),
+            eq(postsTable.generatedFromSource, true),
+            eq(postsTable.status, "published"),
+          ),
+        ),
+      db
+        .select({ hash: postsTable.sourceTextHash })
+        .from(postsTable)
+        .where(
+          and(
+            gte(postsTable.createdAt, oneDayAgo),
+            eq(postsTable.generatedFromSource, true),
+            eq(postsTable.status, "skipped"),
+          ),
+        ),
+    ]);
+    recentSources = publishedSources;
+    recentlySkippedHashes = new Set(
+      skippedSources.map((row) => row.hash).filter((hash): hash is string => Boolean(hash)),
+    );
+  } else {
+    // Preserve the existing PANKOFF CRYPTO behaviour exactly.
+    recentSources = await db
+      .select({ hash: postsTable.sourceTextHash, preview: postsTable.sourcePreview })
+      .from(postsTable)
+      .where(
+        and(
+          gte(postsTable.createdAt, sevenDaysAgo),
+          eq(postsTable.generatedFromSource, true),
+        ),
+      );
+  }
+
+  const usedHashes = new Set(
+    recentSources
+      .map((row) => row.hash)
+      .filter((hash): hash is string => Boolean(hash)),
+  );
+  for (const hash of recentlySkippedHashes) usedHashes.add(hash);
+
+  // Approximate text comparison is intentionally limited to published posts in
+  // the business profile. A rejected draft must not suppress a different story.
   const recentPreviews = recentSources
-    .map((r) => r.preview)
+    .map((row) => row.preview)
     .filter((preview): preview is string => Boolean(preview));
 
-  const candidates = prioritizeSourceDiversity(
-    sourcePosts.filter(
-      (p) =>
-        !usedHashes.has(p.textHash) &&
-        !wasRecentlyRejectedByAi(p.textHash) &&
-        !recentPreviews.some((preview) => areLikelyDuplicate(p.fullText, preview)),
-    ),
+  let usedHashRejected = 0;
+  let aiRejected = 0;
+  let duplicateRejected = 0;
+  const filteredSourcePosts = sourcePosts.filter((post) => {
+    if (usedHashes.has(post.textHash)) {
+      usedHashRejected++;
+      return false;
+    }
+    if (wasRecentlyRejectedByAi(post.textHash)) {
+      aiRejected++;
+      return false;
+    }
+    if (recentPreviews.some((preview) => areLikelyDuplicate(post.fullText, preview))) {
+      duplicateRejected++;
+      return false;
+    }
+    return true;
+  });
+
+  const candidates = prioritizeSourceDiversity(filteredSourcePosts);
+  logger.info(
+    {
+      profile: contentProfile.id,
+      fetched: allSourcePosts.length,
+      fresh: sourcePosts.length,
+      publishedCompared: recentSources.length,
+      recentlySkipped: recentlySkippedHashes.size,
+      usedHashRejected,
+      aiRejected,
+      duplicateRejected,
+      candidates: candidates.length,
+    },
+    "Source candidate filter results",
   );
+
   if (candidates.length === 0) {
     await notify("ℹ️ Усі свіжі матеріали вже використані або повторюють опубліковані новини.");
     return null;

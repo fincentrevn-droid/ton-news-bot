@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { db, sourcesTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { logger } from "./logger";
+import { getContentProfile } from "../config/content-profile";
 import { fetchTelegramChannelPosts, isTelegramReaderAvailable } from "./telegram-reader";
 import {
   hasHighRiskRegulatoryClaim,
@@ -253,5 +254,21 @@ export async function fetchSourcePosts(): Promise<SourcePost[]> {
       b.pubDate.getTime() - a.pubDate.getTime(),
   );
 
-  return sorted.slice(0, 15);
+  // FINCENTRE BUSINESS previously considered only the top 15 items. After
+  // published/rejected/duplicate filters were applied downstream, that small
+  // window could become empty while dozens of valid fresh items still existed.
+  // Keep the crypto profile unchanged and widen only the business candidate pool.
+  const contentProfile = getContentProfile();
+  const candidateLimit = contentProfile.id === "business" ? 60 : 15;
+
+  logger.info(
+    {
+      profile: contentProfile.id,
+      totalRanked: sorted.length,
+      candidateLimit,
+    },
+    "Source ranking completed",
+  );
+
+  return sorted.slice(0, candidateLimit);
 }
