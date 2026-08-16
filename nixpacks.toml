@@ -1,3 +1,6 @@
+[phases.setup]
+aptPkgs = ["...", "imagemagick", "tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-ukr", "tesseract-ocr-rus", "zbar-tools"]
+
 [phases.install]
 cmds = ["pnpm install --no-frozen-lockfile"]
 

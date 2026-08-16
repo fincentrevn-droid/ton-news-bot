@@ -8,6 +8,7 @@ import {
   MIN_BUSINESS_RELEVANCE_SCORE,
   scoreBusinessRelevance,
 } from "./business-filter";
+import { getContentProfile } from "../config/content-profile";
 
 // Load gramjs as CJS via require — avoids ESM/CJS interop issues with esbuild
 const _req = createRequire(import.meta.url);
@@ -21,6 +22,7 @@ function loadGram() {
 // Gramjs client singleton — connects once, stays alive
 let clientInstance: unknown = null;
 let clientConnected = false;
+const contentProfile = getContentProfile();
 
 function isSessionConfigured(): boolean {
   return Boolean(
@@ -148,14 +150,34 @@ export async function fetchTelegramChannelPosts(
         const msgId = (msgAny.id ?? 0) as number;
         const link = `https://t.me/${username}/${msgId}`;
 
-        // Download photo if present
+        // PANKOFF CRYPTO keeps the existing eager download behaviour. For
+        // FINCENTRE BUSINESS the selected photo is downloaded later and must
+        // pass the local safety scan before it can be attached.
         let mediaBuffer: Buffer | undefined;
+        let mediaLoader: (() => Promise<Buffer | undefined>) | undefined;
         let mediaType: "photo" | "none" = "none";
         if (hasPhoto && process.env.ENABLE_MEDIA_DOWNLOAD === "true") {
-          mediaBuffer = await downloadPhoto(client, msg, ch.name);
-          if (mediaBuffer) {
+          if (contentProfile.id === "business") {
             mediaType = "photo";
-            logger.info({ channel: ch.name, msgId, bytes: mediaBuffer.length }, "Downloaded photo from Telegram post");
+            let downloadPromise: Promise<Buffer | undefined> | null = null;
+            mediaLoader = () => {
+              downloadPromise ??= downloadPhoto(client, msg, ch.name).then((buffer) => {
+                if (buffer) {
+                  logger.info(
+                    { channel: ch.name, msgId, bytes: buffer.length },
+                    "Downloaded selected business photo for safety scan",
+                  );
+                }
+                return buffer;
+              });
+              return downloadPromise;
+            };
+          } else {
+            mediaBuffer = await downloadPhoto(client, msg, ch.name);
+            if (mediaBuffer) {
+              mediaType = "photo";
+              logger.info({ channel: ch.name, msgId, bytes: mediaBuffer.length }, "Downloaded photo from Telegram post");
+            }
           }
         }
 
@@ -173,6 +195,7 @@ export async function fetchTelegramChannelPosts(
           isPrimarySource: Boolean(ch.isPrimary),
           mediaType,
           mediaBuffer,
+          mediaLoader,
         });
       }
       return posts;

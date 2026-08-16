@@ -26,6 +26,8 @@ export interface SourcePost {
   // Media extracted from source (Telegram posts only)
   mediaType?: "photo" | "none";
   mediaBuffer?: Buffer;
+  // FINCENTRE BUSINESS defers the download until a source is selected.
+  mediaLoader?: () => Promise<Buffer | undefined>;
 }
 
 function extractTag(xml: string, tag: string): string {
