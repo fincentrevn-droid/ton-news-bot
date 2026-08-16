@@ -18,6 +18,7 @@ import { checkSafety, cleanContent } from "./safety";
 import { logger } from "./logger";
 import { areLikelyDuplicate } from "./business-filter";
 import { getContentProfile } from "../config/content-profile";
+import { assessBusinessImageSafety } from "./media-safety";
 
 export type NotifyFn = (msg: string) => Promise<void>;
 
@@ -256,7 +257,6 @@ export async function generateAndQueuePost(
   const cleanedContent = cleanContent(content, safety);
   await incrementAiUsage("post");
 
-  const hasMedia = candidate.mediaType === "photo" && Boolean(candidate.mediaBuffer);
   const sourceType = candidate.channelUrl?.startsWith("@") ? "telegram_channel" : "rss";
 
   // ── AI quality check ──────────────────────────────────────────────────────
@@ -334,14 +334,76 @@ export async function generateAndQueuePost(
   const routeToQueue = autoPublishEnabled && qualifies && qualityOk && sourceAgeOk;
   const skipForFullAuto = autoPublishEnabled && !routeToQueue;
 
+  // Download and scan only the selected FINCENTRE image. Business images fail
+  // closed: any download/scanner problem produces a normal text-only post.
+  let approvedMediaBuffer: Buffer | undefined;
+  let mediaDownloadStatus: string | null = null;
+
+  if (!skipForFullAuto && candidate.mediaType === "photo") {
+    if (contentProfile.id === "business") {
+      let downloadedBuffer = candidate.mediaBuffer;
+      try {
+        downloadedBuffer ??= await candidate.mediaLoader?.();
+      } catch (err) {
+        logger.warn({ err, channel: candidate.channel }, "Business photo download failed");
+      }
+
+      if (!downloadedBuffer) {
+        mediaDownloadStatus = "download_failed";
+        logger.info(
+          { profile: contentProfile.id, channel: candidate.channel, decision: "text_only", reason: "download_failed" },
+          "Business image safety decision",
+        );
+      } else {
+        try {
+          const decision = await assessBusinessImageSafety({
+            buffer: downloadedBuffer,
+            sourceChannel: candidate.channel,
+            sourceText: candidate.fullText,
+          });
+          mediaDownloadStatus = decision.allowed ? "ok" : `rejected:${decision.reason}`;
+          if (decision.allowed) approvedMediaBuffer = downloadedBuffer;
+          logger.info(
+            {
+              profile: contentProfile.id,
+              channel: candidate.channel,
+              decision: decision.allowed ? "photo" : "text_only",
+              reason: decision.reason,
+              format: decision.format,
+              width: decision.width,
+              height: decision.height,
+              detectedWords: decision.detectedWords,
+            },
+            "Business image safety decision",
+          );
+        } catch (err) {
+          mediaDownloadStatus = "rejected:scan_failed";
+          logger.warn(
+            { err, profile: contentProfile.id, channel: candidate.channel },
+            "Business image safety scan failed — using text only",
+          );
+        }
+      }
+    } else if (candidate.mediaBuffer) {
+      // Preserve the existing PANKOFF CRYPTO media path.
+      approvedMediaBuffer = candidate.mediaBuffer;
+      mediaDownloadStatus = "ok";
+    }
+  }
+
+  let hasMedia = Boolean(approvedMediaBuffer);
+
   // ── Pre-upload media for queued posts ────────────────────────────────────
   // For manual-review posts, sendReviewMessage uploads the photo and returns file_id.
   // For queued posts, that never happens — upload now so the scheduler can publish with photo.
   let preUploadedFileId: string | null = null;
-  if (routeToQueue && hasMedia && candidate.mediaBuffer) {
+  if (routeToQueue && hasMedia && approvedMediaBuffer) {
     try {
-      preUploadedFileId = await uploadPhotoGetFileId(candidate.mediaBuffer);
+      preUploadedFileId = await uploadPhotoGetFileId(approvedMediaBuffer);
     } catch (err) {
+      hasMedia = false;
+      approvedMediaBuffer = undefined;
+      mediaDownloadStatus = "preupload_failed";
       logger.warn({ err }, "Failed to pre-upload media for queued post — will publish as text");
     }
   }
@@ -367,7 +429,7 @@ export async function generateAndQueuePost(
       confidence,
       hasMedia,
       mediaType: candidate.mediaType ?? null,
-      mediaDownloadStatus: hasMedia ? "ok" : null,
+      mediaDownloadStatus,
       mediaFileId: preUploadedFileId,
       qualityScore: qualityResult?.quality_score ?? null,
       qualityCheckPassed: qualityResult?.passed ?? null,
@@ -427,7 +489,7 @@ export async function generateAndQueuePost(
     postType,
     undefined,
     reviewMeta,
-    hasMedia ? candidate.mediaBuffer : undefined,
+    hasMedia ? approvedMediaBuffer : undefined,
   );
 
   const updateFields: Record<string, unknown> = {};
