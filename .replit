@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "python-3.11"]
 
 [deployment]
 router = "application"
@@ -33,3 +33,4 @@ NODE_ENV = "development"
 
 [nix]
 channel = "stable-25_05"
+packages = ["tesseract", "zbar"]

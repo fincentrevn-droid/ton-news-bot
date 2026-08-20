@@ -23,6 +23,7 @@ import {
   canUseCryptoSourceMedia,
   cryptoSourceAgeHours,
 } from "./crypto-policy";
+import { inspectCryptoMedia } from "./crypto-media-safety";
 
 export type NotifyFn = (msg: string) => Promise<void>;
 
@@ -116,6 +117,7 @@ export async function generateAndQueuePost(
   let confidence = "medium";
   let candidate = candidates[0];
   const skippedHashes = new Set<string>();
+  let mediaAssessment = { accepted: true, reasons: [] as string[] };
 
   for (let attempt = 0; attempt < Math.min(candidates.length, 5); attempt++) {
     const pick = candidates.find((p) => !skippedHashes.has(p.textHash)) ?? candidates[0];
@@ -129,6 +131,31 @@ export async function generateAndQueuePost(
     if (attempt === 0) {
       const mediaNote = candidate.mediaType === "photo" ? " 📷" : "";
       await notify(`📰 Источник: <b>${candidate.channel}</b>${mediaNote}\n\n🤖 Генерирую пост...`);
+    }
+
+    mediaAssessment = cryptoProfile
+      ? canUseCryptoSourceMedia(candidate.fullText)
+      : { accepted: true, reasons: [] };
+    if (cryptoProfile && mediaAssessment.accepted && candidate.mediaType === "photo" && candidate.mediaBuffer) {
+      try {
+        const visualAssessment = await inspectCryptoMedia(candidate.mediaBuffer, candidate.channel);
+        mediaAssessment = {
+          accepted: visualAssessment.accepted,
+          reasons: [...mediaAssessment.reasons, ...visualAssessment.reasons],
+        };
+        if (!visualAssessment.accepted) {
+          logger.info(
+            { channel: candidate.channel, reasons: visualAssessment.reasons },
+            "Crypto visual media rejected — retaining text-only post",
+          );
+        }
+      } catch (err) {
+        mediaAssessment = {
+          accepted: false,
+          reasons: [...mediaAssessment.reasons, "visual media scan failed"],
+        };
+        logger.warn({ err, channel: candidate.channel }, "Crypto visual media scan threw — retaining text-only post");
+      }
     }
 
     try {
@@ -158,9 +185,6 @@ export async function generateAndQueuePost(
   const cleanedContent = cleanContent(content, safety);
   await incrementAiUsage("post");
 
-  const mediaAssessment = cryptoProfile
-    ? canUseCryptoSourceMedia(candidate.fullText)
-    : { accepted: true, reasons: [] };
   const hasMedia = candidate.mediaType === "photo" && Boolean(candidate.mediaBuffer) && mediaAssessment.accepted;
   if (cryptoProfile && candidate.mediaType === "photo" && !mediaAssessment.accepted) {
     logger.info(
@@ -288,7 +312,9 @@ export async function generateAndQueuePost(
       confidence,
       hasMedia,
       mediaType: candidate.mediaType ?? null,
-      mediaDownloadStatus: hasMedia ? "ok" : null,
+      mediaDownloadStatus: cryptoProfile && candidate.mediaType === "photo"
+        ? (hasMedia ? "visual_safe" : "visual_rejected")
+        : (hasMedia ? "ok" : null),
       mediaFileId: preUploadedFileId,
       qualityScore: qualityResult?.quality_score ?? null,
       qualityCheckPassed: qualityResult?.passed ?? null,

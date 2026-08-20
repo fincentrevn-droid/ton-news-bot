@@ -7,10 +7,9 @@ import { checkSafety, cleanContent } from "../lib/safety";
 import { isInActiveWindow } from "../lib/scheduler";
 import { generateAndQueuePost } from "../lib/auto-generate";
 import { logger } from "../lib/logger";
-import { getContentProfile } from "../config/content-profile";
+import { isCryptoProfile } from "../lib/channel-profile";
 
 const router = Router();
-const contentProfile = getContentProfile();
 
 interface TelegramUser {
   id: number;
@@ -78,13 +77,24 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
     try {
       let messageId: number;
       let newFileId: string | null = post.mediaFileId ?? null;
+      const canPublishPhoto = Boolean(
+        post.hasMedia
+        && post.mediaFileId
+        && (!isCryptoProfile() || post.mediaDownloadStatus === "visual_safe"),
+      );
 
-      if (post.hasMedia && post.mediaFileId) {
+      if (canPublishPhoto && post.mediaFileId) {
         // Reuse stored file_id — no re-upload needed
         const result = await sendPhotoPost(post.mediaFileId, post.content);
         messageId = result.messageId;
         newFileId = result.fileId || post.mediaFileId;
       } else {
+        if (isCryptoProfile() && post.hasMedia) {
+          logger.warn(
+            { postId, mediaDownloadStatus: post.mediaDownloadStatus },
+            "Crypto review media lacks successful visual scan — publishing text only",
+          );
+        }
         messageId = await sendTelegramMessage(post.content);
       }
 
@@ -96,7 +106,7 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
           ...(newFileId ? { mediaFileId: newFileId } : {}),
         })
         .where(eq(postsTable.id, postId));
-      await answerCallbackQuery(query.id, post.hasMedia ? "✅ Опубликован с фото!" : "✅ Опубликован в канал!");
+      await answerCallbackQuery(query.id, canPublishPhoto ? "✅ Опубликован с фото!" : "✅ Опубликован в канал!");
     } catch (err) {
       logger.error({ err }, "Publish via button failed");
       await answerCallbackQuery(query.id, "❌ Ошибка при публикации");
@@ -110,7 +120,6 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
         sourceText: post.sourcePreview ?? undefined,
         sourceUrl: post.sourceLink ?? post.sourceUrl ?? undefined,
         sourceChannel: post.sourceChannel ?? undefined,
-        sourcePublishedAt: post.sourceDate ?? undefined,
         forceFormat: post.postType as "micro" | "short" | "medium" | "long",
       });
 
@@ -130,7 +139,11 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
         .where(eq(postsTable.id, postId));
 
       // If post had media, reuse existing file_id in the new review
-      const photoSource = post.hasMedia && post.mediaFileId ? post.mediaFileId : undefined;
+      const photoSource = post.hasMedia
+        && post.mediaFileId
+        && (!isCryptoProfile() || post.mediaDownloadStatus === "visual_safe")
+        ? post.mediaFileId
+        : undefined;
 
       const { messageId: reviewMsgId, fileId: newFileId } = await sendReviewMessage(
         postId,
@@ -182,15 +195,15 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
 
   if (text.startsWith("/start")) {
     const msg =
-      `👋 <b>${contentProfile.channelName} News Bot</b>\n\n` +
-      `${contentProfile.botDescription}\n\n` +
-      `<b>Команди:</b>\n` +
-      `/status — статус публікацій та AI-викликів\n` +
-      `/generate_now — перевірити джерела зараз\n` +
-      `/sources — активні джерела\n` +
-      `/costs — AI-витрати й ліміти\n` +
-      `/help — довідка\n\n` +
-      `📌 У канал потрапляють лише матеріали, що пройшли всі автоматичні фільтри.`;
+      `👋 <b>TON News Bot</b>\n\n` +
+      `Бот для автоматизации Telegram-канала про TON и крипту.\n\n` +
+      `<b>Команды:</b>\n` +
+      `/status — статус постов и AI-вызовов сегодня\n` +
+      `/generate_now — запустить генерацию вручную\n` +
+      `/sources — активные источники\n` +
+      `/costs — AI-расходы и лимиты\n` +
+      `/help — справка\n\n` +
+      `📌 Каждый новый пост придёт сюда с кнопками ✅ 🔁 ❌`;
     await sendReply(msg);
 
   } else if (text.startsWith("/status")) {
@@ -206,21 +219,21 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
 
     const msg =
       `📊 <b>Статус бота</b>\n\n` +
-      `📝 Опрацьовано матеріалів: ${usage.postsGenerated}/${settings.maxPostsPerDay}\n` +
-      `✅ Опубліковано: ${Number(published[0]?.count ?? 0)}\n` +
-      `⏳ Очікують перевірки: ${Number(pendingReview[0]?.count ?? 0)}\n` +
-      `📋 Чернетки: ${Number(drafts[0]?.count ?? 0)}\n` +
+      `📝 Создано постов: ${usage.postsGenerated}/${settings.maxPostsPerDay}\n` +
+      `✅ Опубликовано: ${Number(published[0]?.count ?? 0)}\n` +
+      `⏳ Ожидают ревью: ${Number(pendingReview[0]?.count ?? 0)}\n` +
+      `📋 Черновики: ${Number(drafts[0]?.count ?? 0)}\n` +
       `⏭️ Пропущено: ${Number(skipped[0]?.count ?? 0)}\n` +
-      `🚫 Відхилено safety: ${Number(safetyRejected[0]?.count ?? 0)}\n` +
-      `🤖 AI-виклики сьогодні: ${usage.callsUsed}/${settings.maxAiCallsPerDay}`;
+      `🚫 Отклонено safety: ${Number(safetyRejected[0]?.count ?? 0)}\n` +
+      `🤖 AI вызовы сегодня: ${usage.callsUsed}/${settings.maxAiCallsPerDay}`;
     await sendReply(msg);
 
   } else if (text.startsWith("/generate_now")) {
-    await sendReply("🔄 Шукаю свіжі матеріали...");
+    await sendReply("🔄 Ищу свежие источники...");
     try {
       await generateAndQueuePost(sendReply);
     } catch (err) {
-      await sendReply(`❌ Помилка: ${err instanceof Error ? err.message : "невідома"}`);
+      await sendReply(`❌ Ошибка: ${err instanceof Error ? err.message : "неизвестная"}`);
     }
 
   } else if (text.startsWith("/sources")) {
@@ -228,14 +241,14 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
     const primary = sources.filter((s) => s.isPrimary);
     const secondary = sources.filter((s) => !s.isPrimary);
 
-    let msg = `📡 <b>Активні джерела</b>\n\n`;
+    let msg = `📡 <b>Активные источники</b>\n\n`;
     if (primary.length) {
-      msg += `<b>Офіційні:</b>\n${primary.map((s) => `• ${s.name}: ${s.url}`).join("\n")}\n\n`;
+      msg += `<b>Telegram (основные):</b>\n${primary.map((s) => `• ${s.name} — ${s.url}`).join("\n")}\n\n`;
     }
     if (secondary.length) {
-      msg += `<b>Додаткові:</b>\n${secondary.map((s) => `• ${s.name}: ${s.url}`).join("\n")}`;
+      msg += `<b>RSS/Web (вторичные):</b>\n${secondary.map((s) => `• ${s.name} — ${s.url}`).join("\n")}`;
     }
-    if (!primary.length && !secondary.length) msg = "Немає активних джерел.";
+    if (!primary.length && !secondary.length) msg = "Нет активных источников.";
     await sendReply(msg);
 
   } else if (text.startsWith("/costs")) {
@@ -245,23 +258,24 @@ async function handleBotCommand(message: TelegramMessage): Promise<void> {
     const warning = aiPct >= 80 || postPct >= 80 ? "\n\n⚠️ Лимиты заканчиваются!" : "";
 
     const msg =
-      `💰 <b>AI-витрати сьогодні</b>\n\n` +
-      `🤖 AI-виклики: ${usage.callsUsed}/${settings.maxAiCallsPerDay} (${aiPct}%)\n` +
-      `📝 Опрацьовано матеріалів: ${usage.postsGenerated}/${settings.maxPostsPerDay} (${postPct}%)\n` +
-      `🔁 Переписувань: ${usage.rewritesUsed}/${settings.maxRewritePerPost}\n` +
-      `💡 Контроль витрат: ${settings.enableCostGuard ? "увімкнено" : "вимкнено"}` +
+      `💰 <b>Расходы AI сегодня</b>\n\n` +
+      `🤖 AI вызовы: ${usage.callsUsed}/${settings.maxAiCallsPerDay} (${aiPct}%)\n` +
+      `📝 Постов создано: ${usage.postsGenerated}/${settings.maxPostsPerDay} (${postPct}%)\n` +
+      `🔁 Перегенераций: ${usage.rewritesUsed}/${settings.maxRewritePerPost}\n` +
+      `💡 Cost guard: ${settings.enableCostGuard ? "включён" : "выключен"}` +
       warning;
     await sendReply(msg);
 
   } else if (text.startsWith("/help")) {
     const msg =
-      `🤖 <b>Команди бота</b>\n\n` +
-      `/status — статус публікацій та AI-викликів\n` +
-      `/generate_now — перевірити свіжі джерела\n` +
-      `/sources — показати активні джерела\n` +
-      `/costs — AI-витрати й ліміти\n` +
-      `/help — ця довідка\n\n` +
-      `📌 Повний автоматичний режим: слабкі або сумнівні матеріали пропускаються.`;
+      `🤖 <b>Команды бота</b>\n\n` +
+      `/status — статус постов и AI-вызовов\n` +
+      `/generate_now — найти источник и сгенерировать пост\n` +
+      `/sources — показать активные источники\n` +
+      `/costs — AI-расходы и лимиты\n` +
+      `/help — эта справка\n\n` +
+      `📌 Каждый пост основан на реальном источнике и отправляется на ревью с кнопками:\n` +
+      `✅ Опубликовать  🔁 Переписать  ❌ Пропустить`;
     await sendReply(msg);
   }
 }

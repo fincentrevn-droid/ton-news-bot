@@ -164,12 +164,23 @@ export async function tickPublisher(): Promise<void> {
 
     let messageId: number;
     let newFileId: string | null = post.mediaFileId ?? null;
+    const canPublishPhoto = Boolean(
+      post.hasMedia
+      && post.mediaFileId
+      && (!isCryptoProfile() || post.mediaDownloadStatus === "visual_safe"),
+    );
 
-    if (post.hasMedia && post.mediaFileId) {
+    if (canPublishPhoto && post.mediaFileId) {
       const result = await sendPhotoPost(post.mediaFileId, post.content);
       messageId = result.messageId;
       newFileId = result.fileId || post.mediaFileId;
     } else {
+      if (isCryptoProfile() && post.hasMedia) {
+        logger.warn(
+          { postId: post.id, mediaDownloadStatus: post.mediaDownloadStatus },
+          "Crypto post media lacks successful visual scan — publishing text only",
+        );
+      }
       messageId = await sendTelegramMessage(post.content);
     }
 
