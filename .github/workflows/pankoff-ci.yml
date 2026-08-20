@@ -28,6 +28,7 @@ jobs:
           node scripts/patch-pankoff-footer.mjs
           node scripts/patch-pankoff-hardening-2.mjs
           node scripts/patch-pankoff-style-v2.mjs
+          node scripts/patch-pankoff-publish-recovery.mjs
       - name: Typecheck libraries
         run: pnpm run typecheck:libs
       - name: Build API
