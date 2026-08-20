@@ -37,13 +37,17 @@ jobs:
           node scripts/patch-pankoff-style-v2.mjs
           node scripts/patch-pankoff-publish-recovery.mjs
           node scripts/patch-pankoff-final-hardening.mjs
+          node scripts/patch-pankoff-disable-footer.mjs
       - name: Profile isolation smoke test
         run: |
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
             grep -q 'patch-pankoff-final-hardening.mjs' scripts/start-railway.sh
+            grep -q 'patch-pankoff-disable-footer.mjs' scripts/start-railway.sh
             grep -q 'PANKOFF_NO_EMERGENCY_RSS' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_REVIEW_RECOVERABLE_LOCK' scripts/patch-pankoff-final-hardening.mjs
+            grep -q 'PANKOFF_SOCIAL_FOOTER_DISABLED' artifacts/api-server/src/lib/telegram.ts
+            ! grep -q 'PANKOFF_FOOTER_PREVIEW' artifacts/dashboard/src/pages/posts.tsx
           else
             ! grep -q 'PANKOFF_FINAL_BODY_GATE' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
