@@ -16,49 +16,17 @@ import { sendReviewMessage, uploadPhotoGetFileId, type ReviewMeta } from "./tele
 import { fetchSourcePosts } from "./sources";
 import { checkSafety, cleanContent } from "./safety";
 import { logger } from "./logger";
-import { areLikelyDuplicate } from "./business-filter";
-import { getContentProfile } from "../config/content-profile";
-import { assessBusinessImageSafety } from "./media-safety";
+import { isCryptoProfile } from "./channel-profile";
+import {
+  assessCryptoPublicBody,
+  assessCryptoSource,
+  canUseCryptoSourceMedia,
+  cryptoSourceAgeHours,
+} from "./crypto-policy";
 
 export type NotifyFn = (msg: string) => Promise<void>;
 
 const silentNotify: NotifyFn = async (_msg) => { /* no-op */ };
-
-// Do not spend AI calls on the same source after the model has already
-// rejected it. The cache lives for one source-freshness window and is reset
-// naturally when the service restarts.
-const AI_REJECTION_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_SOURCE_ATTEMPTS_PER_RUN = 5;
-const aiRejectedSourceHashes = new Map<string, number>();
-const contentProfile = getContentProfile();
-
-/**
- * Preserve relevance ranking while giving each source one opportunity before
- * a second post from the same channel. This prevents one prolific channel
- * from consuming the whole generation cycle.
- */
-export function prioritizeSourceDiversity<T extends { channel: string }>(posts: T[]): T[] {
-  const firstByChannel = new Map<string, T>();
-  const remaining: T[] = [];
-
-  for (const post of posts) {
-    if (firstByChannel.has(post.channel)) {
-      remaining.push(post);
-    } else {
-      firstByChannel.set(post.channel, post);
-    }
-  }
-
-  return [...firstByChannel.values(), ...remaining];
-}
-
-function wasRecentlyRejectedByAi(hash: string): boolean {
-  const rejectedAt = aiRejectedSourceHashes.get(hash);
-  if (!rejectedAt) return false;
-  if (Date.now() - rejectedAt < AI_REJECTION_TTL_MS) return true;
-  aiRejectedSourceHashes.delete(hash);
-  return false;
-}
 
 /** Quality gate for auto-publish routing (webhook + scheduler share this). */
 export function qualifiesForAutoPublish(opts: {
@@ -67,10 +35,12 @@ export function qualifiesForAutoPublish(opts: {
   content: string;
 }): boolean {
   if (opts.confidence === "low") return false;
-  // Full auto mode is strict: even a stripped suspicious link blocks publication.
-  if (opts.safety.status !== "ok") return false;
+  // "flagged" = suspicious links stripped (still publishable), "rejected" = blocked
+  if (opts.safety.status === "rejected") return false;
   if (!opts.content.trim()) return false;
-  if (!opts.content.includes("\n\n")) return false;
+  // PANKOFF can publish a genuinely brief one-paragraph fact. Legacy profiles
+  // keep their established two-paragraph requirement unchanged.
+  if (!isCryptoProfile() && !opts.content.includes("\n\n")) return false;
   return true;
 }
 
@@ -90,122 +60,54 @@ export interface GenerateResult {
 export async function generateAndQueuePost(
   notify: NotifyFn = silentNotify,
 ): Promise<GenerateResult | null> {
-  const maxSourceAgeHours = parseInt(process.env.MAX_SOURCE_AGE_HOURS ?? "48", 10);
+  const cryptoProfile = isCryptoProfile();
+  const maxSourceAgeHours = cryptoProfile
+    ? cryptoSourceAgeHours()
+    : parseInt(process.env.MAX_SOURCE_AGE_HOURS ?? "48", 10);
   const freshnessMs = maxSourceAgeHours * 60 * 60 * 1000;
   const freshnessThreshold = new Date(Date.now() - freshnessMs);
 
   const allSourcePosts = await fetchSourcePosts();
 
   // ── Freshness filter: discard sources older than MAX_SOURCE_AGE_HOURS ────
-  const sourcePosts = allSourcePosts.filter((p) => p.pubDate >= freshnessThreshold);
+  const freshSourcePosts = allSourcePosts.filter((p) => p.pubDate >= freshnessThreshold);
+  const sourcePosts = cryptoProfile
+    ? freshSourcePosts.filter((post) => {
+      const assessment = assessCryptoSource(post.fullText, post.pubDate);
+      if (!assessment.accepted) {
+        logger.info(
+          { channel: post.channel, reasons: assessment.reasons },
+          "Crypto source rejected before generation",
+        );
+      }
+      return assessment.accepted;
+    })
+    : freshSourcePosts;
 
   if (sourcePosts.length === 0) {
     const noSession = !process.env.TELEGRAM_STRING_SESSION;
     const msg = noSession
-      ? "⚠️ TELEGRAM_STRING_SESSION не задано, Telegram-канали недоступні."
-      : `⚠️ Немає свіжих джерел за ${maxSourceAgeHours} год, пост не створено.`;
+      ? "⚠️ TELEGRAM_STRING_SESSION не задан — Telegram-каналы недоступны."
+      : `⚠️ Нет свежих источников за ${maxSourceAgeHours}ч — пост не создан.`;
     await notify(msg);
     return null;
   }
 
-  // Avoid re-using published source posts from the last 7 days. For the
-  // business profile, skipped posts are blocked by exact hash for only 24 hours:
-  // they must not poison approximate deduplication for an entire week.
+  // Avoid re-using source posts from the last 7 days
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  let recentSources: Array<{ hash: string | null; preview: string | null }>;
-  let recentlySkippedHashes = new Set<string>();
+  const recentHashes = await db
+    .select({ hash: postsTable.sourceTextHash })
+    .from(postsTable)
+    .where(and(gte(postsTable.createdAt, sevenDaysAgo), eq(postsTable.generatedFromSource, true)));
 
-  if (contentProfile.id === "business") {
-    const [publishedSources, skippedSources] = await Promise.all([
-      db
-        .select({ hash: postsTable.sourceTextHash, preview: postsTable.sourcePreview })
-        .from(postsTable)
-        .where(
-          and(
-            gte(postsTable.createdAt, sevenDaysAgo),
-            eq(postsTable.generatedFromSource, true),
-            eq(postsTable.status, "published"),
-          ),
-        ),
-      db
-        .select({ hash: postsTable.sourceTextHash })
-        .from(postsTable)
-        .where(
-          and(
-            gte(postsTable.createdAt, oneDayAgo),
-            eq(postsTable.generatedFromSource, true),
-            eq(postsTable.status, "skipped"),
-          ),
-        ),
-    ]);
-    recentSources = publishedSources;
-    recentlySkippedHashes = new Set(
-      skippedSources.map((row) => row.hash).filter((hash): hash is string => Boolean(hash)),
-    );
-  } else {
-    // Preserve the existing PANKOFF CRYPTO behaviour exactly.
-    recentSources = await db
-      .select({ hash: postsTable.sourceTextHash, preview: postsTable.sourcePreview })
-      .from(postsTable)
-      .where(
-        and(
-          gte(postsTable.createdAt, sevenDaysAgo),
-          eq(postsTable.generatedFromSource, true),
-        ),
-      );
-  }
+  const usedHashes = new Set(recentHashes.map((r) => r.hash).filter(Boolean));
 
-  const usedHashes = new Set(
-    recentSources
-      .map((row) => row.hash)
-      .filter((hash): hash is string => Boolean(hash)),
-  );
-  for (const hash of recentlySkippedHashes) usedHashes.add(hash);
-
-  // Approximate text comparison is intentionally limited to published posts in
-  // the business profile. A rejected draft must not suppress a different story.
-  const recentPreviews = recentSources
-    .map((row) => row.preview)
-    .filter((preview): preview is string => Boolean(preview));
-
-  let usedHashRejected = 0;
-  let aiRejected = 0;
-  let duplicateRejected = 0;
-  const filteredSourcePosts = sourcePosts.filter((post) => {
-    if (usedHashes.has(post.textHash)) {
-      usedHashRejected++;
-      return false;
-    }
-    if (wasRecentlyRejectedByAi(post.textHash)) {
-      aiRejected++;
-      return false;
-    }
-    if (recentPreviews.some((preview) => areLikelyDuplicate(post.fullText, preview))) {
-      duplicateRejected++;
-      return false;
-    }
-    return true;
-  });
-
-  const candidates = prioritizeSourceDiversity(filteredSourcePosts);
-  logger.info(
-    {
-      profile: contentProfile.id,
-      fetched: allSourcePosts.length,
-      fresh: sourcePosts.length,
-      publishedCompared: recentSources.length,
-      recentlySkipped: recentlySkippedHashes.size,
-      usedHashRejected,
-      aiRejected,
-      duplicateRejected,
-      candidates: candidates.length,
-    },
-    "Source candidate filter results",
-  );
-
+  const candidates = sourcePosts.filter((p) => !usedHashes.has(p.textHash));
+  // Legacy behavior deliberately keeps its reuse fallback. PANKOFF must never
+  // fill the feed with a duplicate if there is no fresh, unprocessed fact.
+  if (candidates.length === 0 && !cryptoProfile) candidates.push(...sourcePosts);
   if (candidates.length === 0) {
-    await notify("ℹ️ Усі свіжі матеріали вже використані або повторюють опубліковані новини.");
+    await notify("ℹ️ Свежих неповторяющихся новостей для PANKOFF CRYPTO сейчас нет.");
     return null;
   }
 
@@ -215,7 +117,7 @@ export async function generateAndQueuePost(
   let candidate = candidates[0];
   const skippedHashes = new Set<string>();
 
-  for (let attempt = 0; attempt < Math.min(candidates.length, MAX_SOURCE_ATTEMPTS_PER_RUN); attempt++) {
+  for (let attempt = 0; attempt < Math.min(candidates.length, 5); attempt++) {
     const pick = candidates.find((p) => !skippedHashes.has(p.textHash)) ?? candidates[0];
     candidate = pick;
 
@@ -226,7 +128,7 @@ export async function generateAndQueuePost(
 
     if (attempt === 0) {
       const mediaNote = candidate.mediaType === "photo" ? " 📷" : "";
-      await notify(`📰 Джерело: <b>${candidate.channel}</b>${mediaNote}\n\n🤖 Готую пост...`);
+      await notify(`📰 Источник: <b>${candidate.channel}</b>${mediaNote}\n\n🤖 Генерирую пост...`);
     }
 
     try {
@@ -234,14 +136,13 @@ export async function generateAndQueuePost(
         sourceText: candidate.fullText,
         sourceUrl: candidate.link,
         sourceChannel: candidate.channel,
-        sourcePublishedAt: candidate.pubDate,
+        sourceDate: candidate.pubDate,
       }));
       break;
     } catch (err) {
       if (err instanceof Error && err.message === "NO_POST") {
         logger.info({ channel: candidate.channel }, "Source returned NO_POST — trying next");
         skippedHashes.add(candidate.textHash);
-        aiRejectedSourceHashes.set(candidate.textHash, Date.now());
         continue;
       }
       throw err;
@@ -249,7 +150,7 @@ export async function generateAndQueuePost(
   }
 
   if (!content) {
-    await notify("ℹ️ Усі джерела визнано непридатними, пост не створено.");
+    await notify("ℹ️ Все источники признаны неподходящими — пост не создан.");
     return null;
   }
 
@@ -257,11 +158,21 @@ export async function generateAndQueuePost(
   const cleanedContent = cleanContent(content, safety);
   await incrementAiUsage("post");
 
+  const mediaAssessment = cryptoProfile
+    ? canUseCryptoSourceMedia(candidate.fullText)
+    : { accepted: true, reasons: [] };
+  const hasMedia = candidate.mediaType === "photo" && Boolean(candidate.mediaBuffer) && mediaAssessment.accepted;
+  if (cryptoProfile && candidate.mediaType === "photo" && !mediaAssessment.accepted) {
+    logger.info(
+      { channel: candidate.channel, reasons: mediaAssessment.reasons },
+      "Crypto source photo omitted by media safety policy",
+    );
+  }
   const sourceType = candidate.channelUrl?.startsWith("@") ? "telegram_channel" : "rss";
 
   // ── AI quality check ──────────────────────────────────────────────────────
   const qualityCheckEnabled = process.env.ENABLE_AI_QUALITY_CHECK !== "false";
-  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "90", 10);
+  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "85", 10);
   const maxQualityRewrites = parseInt(process.env.MAX_AUTO_QUALITY_REWRITES ?? "1", 10);
 
   let finalContent = cleanedContent;
@@ -277,7 +188,7 @@ export async function generateAndQueuePost(
       );
 
       if (
-        !qualityResult.passed &&
+        (!qualityResult.passed || (cryptoProfile && !qualityResult.safe_for_autopublish)) &&
         qualityResult.needs_rewrite &&
         qualityResult.quality_score >= 60 &&
         rewriteAttempts < maxQualityRewrites
@@ -289,7 +200,6 @@ export async function generateAndQueuePost(
             instruction: qualityResult.rewrite_instruction,
             sourceText: candidate.fullText,
             sourceChannel: candidate.channel,
-            sourcePublishedAt: candidate.pubDate,
             originalFormat: postType,
           });
           rewriteAttempts++;
@@ -311,7 +221,7 @@ export async function generateAndQueuePost(
         }
       }
     } catch (qcErr) {
-      logger.warn({ qcErr }, "Quality check failed — strict gate will reject the post");
+      logger.warn({ qcErr }, "Quality check failed — proceeding without gate");
     }
   }
 
@@ -321,89 +231,39 @@ export async function generateAndQueuePost(
 
   const autoPublishEnabled = schedule?.autoPublish ?? false;
   const qualifies = qualifiesForAutoPublish({ confidence, safety, content: finalContent });
-  const qualityOk = !qualityCheckEnabled
-    ? true
-    : Boolean(
-      qualityResult &&
-      qualityResult.passed &&
-      qualityResult.quality_score >= minQualityScore &&
-      qualityResult.safe_for_autopublish,
-    );
+  const cryptoBodyAssessment = cryptoProfile
+    ? assessCryptoPublicBody(finalContent)
+    : { accepted: true, reasons: [] };
+  const qualityOk =
+    cryptoProfile
+      ? Boolean(
+        qualityCheckEnabled
+        && qualityResult
+        && qualityResult.quality_score >= minQualityScore
+        && qualityResult.safe_for_autopublish,
+      )
+      : (
+        !qualityCheckEnabled ||
+        !qualityResult ||
+        (qualityResult.quality_score >= minQualityScore && qualityResult.safe_for_autopublish)
+      );
   // Source must be fresh (within MAX_SOURCE_AGE_HOURS) and generated from a real source
   const sourceAgeOk = candidate.pubDate >= freshnessThreshold;
-  const routeToQueue = autoPublishEnabled && qualifies && qualityOk && sourceAgeOk;
-  const skipForFullAuto = autoPublishEnabled && !routeToQueue;
-
-  // Download and scan only the selected FINCENTRE image. Business images fail
-  // closed: any download/scanner problem produces a normal text-only post.
-  let approvedMediaBuffer: Buffer | undefined;
-  let mediaDownloadStatus: string | null = null;
-
-  if (!skipForFullAuto && candidate.mediaType === "photo") {
-    if (contentProfile.id === "business") {
-      let downloadedBuffer = candidate.mediaBuffer;
-      try {
-        downloadedBuffer ??= await candidate.mediaLoader?.();
-      } catch (err) {
-        logger.warn({ err, channel: candidate.channel }, "Business photo download failed");
-      }
-
-      if (!downloadedBuffer) {
-        mediaDownloadStatus = "download_failed";
-        logger.info(
-          { profile: contentProfile.id, channel: candidate.channel, decision: "text_only", reason: "download_failed" },
-          "Business image safety decision",
-        );
-      } else {
-        try {
-          const decision = await assessBusinessImageSafety({
-            buffer: downloadedBuffer,
-            sourceChannel: candidate.channel,
-            sourceText: candidate.fullText,
-          });
-          mediaDownloadStatus = decision.allowed ? "ok" : `rejected:${decision.reason}`;
-          if (decision.allowed) approvedMediaBuffer = downloadedBuffer;
-          logger.info(
-            {
-              profile: contentProfile.id,
-              channel: candidate.channel,
-              decision: decision.allowed ? "photo" : "text_only",
-              reason: decision.reason,
-              format: decision.format,
-              width: decision.width,
-              height: decision.height,
-              detectedWords: decision.detectedWords,
-            },
-            "Business image safety decision",
-          );
-        } catch (err) {
-          mediaDownloadStatus = "rejected:scan_failed";
-          logger.warn(
-            { err, profile: contentProfile.id, channel: candidate.channel },
-            "Business image safety scan failed — using text only",
-          );
-        }
-      }
-    } else if (candidate.mediaBuffer) {
-      // Preserve the existing PANKOFF CRYPTO media path.
-      approvedMediaBuffer = candidate.mediaBuffer;
-      mediaDownloadStatus = "ok";
-    }
-  }
-
-  let hasMedia = Boolean(approvedMediaBuffer);
+  const routeToQueue =
+    autoPublishEnabled &&
+    qualifies &&
+    qualityOk &&
+    sourceAgeOk &&
+    cryptoBodyAssessment.accepted;
 
   // ── Pre-upload media for queued posts ────────────────────────────────────
   // For manual-review posts, sendReviewMessage uploads the photo and returns file_id.
   // For queued posts, that never happens — upload now so the scheduler can publish with photo.
   let preUploadedFileId: string | null = null;
-  if (routeToQueue && hasMedia && approvedMediaBuffer) {
+  if (routeToQueue && hasMedia && candidate.mediaBuffer) {
     try {
-      preUploadedFileId = await uploadPhotoGetFileId(approvedMediaBuffer);
+      preUploadedFileId = await uploadPhotoGetFileId(candidate.mediaBuffer);
     } catch (err) {
-      hasMedia = false;
-      approvedMediaBuffer = undefined;
-      mediaDownloadStatus = "preupload_failed";
       logger.warn({ err }, "Failed to pre-upload media for queued post — will publish as text");
     }
   }
@@ -413,7 +273,6 @@ export async function generateAndQueuePost(
     .insert(postsTable)
     .values({
       content: finalContent,
-      status: skipForFullAuto ? "skipped" : "draft",
       postType,
       safetyStatus: safety.status,
       aiCallsUsed: 1 + rewriteAttempts,
@@ -429,7 +288,7 @@ export async function generateAndQueuePost(
       confidence,
       hasMedia,
       mediaType: candidate.mediaType ?? null,
-      mediaDownloadStatus,
+      mediaDownloadStatus: hasMedia ? "ok" : null,
       mediaFileId: preUploadedFileId,
       qualityScore: qualityResult?.quality_score ?? null,
       qualityCheckPassed: qualityResult?.passed ?? null,
@@ -442,31 +301,13 @@ export async function generateAndQueuePost(
   const photoNote = hasMedia ? " с фото 📷" : "";
   const qcNote = qualityResult ? ` · QC ${qualityResult.quality_score}/100` : "";
 
-  if (skipForFullAuto) {
-    logger.info(
-      {
-        postId: post.id,
-        confidence,
-        safety: safety.status,
-        qualityScore: qualityResult?.quality_score,
-        qualityOk,
-        sourceAgeOk,
-      },
-      "Post rejected by strict full-auto filters",
-    );
-    await notify(
-      `⏭️ Матеріал із «<b>${candidate.channel}</b>» не пройшов жорсткі фільтри${qcNote} і пропущений.`,
-    );
-    return null;
-  }
-
   if (routeToQueue) {
     logger.info(
       { postId: post.id, confidence, safety: safety.status, qualityScore: qualityResult?.quality_score },
       "Post queued for auto-publish",
     );
     await notify(
-      `⏳ Пост #${post.id} із «<b>${candidate.channel}</b>»${photoNote} додано до черги автопублікації.${qcNote}`,
+      `⏳ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote} добавлен в очередь авто-публикации.${qcNote}`,
     );
     return { postId: post.id, queued: true, qualityScore: qualityResult?.quality_score, channel: candidate.channel };
   }
@@ -489,7 +330,7 @@ export async function generateAndQueuePost(
     postType,
     undefined,
     reviewMeta,
-    hasMedia ? approvedMediaBuffer : undefined,
+    hasMedia ? candidate.mediaBuffer : undefined,
   );
 
   const updateFields: Record<string, unknown> = {};
@@ -499,6 +340,6 @@ export async function generateAndQueuePost(
     await db.update(postsTable).set(updateFields).where(eq(postsTable.id, post.id));
   }
 
-  await notify(`✅ Пост #${post.id} із «<b>${candidate.channel}</b>»${photoNote}${qcNote} надіслано на перевірку.`);
+  await notify(`✅ Пост #${post.id} из "<b>${candidate.channel}</b>"${photoNote}${qcNote} отправлен на ревью.`);
   return { postId: post.id, queued: false, qualityScore: qualityResult?.quality_score, channel: candidate.channel };
 }
