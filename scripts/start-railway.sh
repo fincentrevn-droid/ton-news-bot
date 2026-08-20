@@ -1,10 +1,12 @@
 #!/bin/sh
 set -e
 
+PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-}}"
+
 # PANKOFF CRYPTO may use a Telethon StringSession copied without trailing base64 padding.
 # GramJS detects Telethon IPv4 sessions by the encoded body length, so normalize only
 # when the payload safely decodes to the expected Telethon IPv4 structure (263 bytes).
-if [ "${CONTENT_PROFILE:-}" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" ]; then
+if [ "$PROFILE" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" ]; then
   normalized_session="$(node -e '
     const s = process.env.TELEGRAM_STRING_SESSION || "";
     if (!s.startsWith("1")) {
@@ -33,16 +35,20 @@ if [ "${CONTENT_PROFILE:-}" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" 
   fi
 fi
 
-# GPT-5.6 Luna only supports the default temperature. The existing shared
-# OpenAI module still contains explicit temperatures for generation, QC and
-# rewrite. Patch only the PANKOFF crypto runtime using Luna, then rebuild the
-# API bundle so production does not send unsupported temperature values.
-if [ "${CONTENT_PROFILE:-}" = "crypto" ] && [ "${OPENAI_MODEL:-}" = "gpt-5.6-luna" ]; then
-  if grep -q "^[[:space:]]*temperature:" artifacts/api-server/src/lib/openai.ts; then
+if [ "$PROFILE" = "crypto" ]; then
+  # GPT-5.6 Luna only supports its default temperature.
+  if [ "${OPENAI_MODEL:-}" = "gpt-5.6-luna" ] && grep -q "^[[:space:]]*temperature:" artifacts/api-server/src/lib/openai.ts; then
     sed -i '/^[[:space:]]*temperature:/d' artifacts/api-server/src/lib/openai.ts
     echo "Removed unsupported temperature overrides for PANKOFF gpt-5.6-luna"
-    pnpm --filter @workspace/api-server run build
   fi
+
+  # Apply PANKOFF-only footer formatting and dashboard final-post preview.
+  node scripts/patch-pankoff-footer.mjs
+
+  # The Railway image was built before the runtime profile-specific patch, so
+  # rebuild only the two affected bundles for the crypto service.
+  pnpm --filter @workspace/api-server run build
+  pnpm --filter @workspace/dashboard run build
 fi
 
 if [ -n "${DATABASE_URL:-}" ]; then
