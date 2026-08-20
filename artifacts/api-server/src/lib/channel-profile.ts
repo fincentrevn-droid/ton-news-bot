@@ -1,11 +1,14 @@
 export type ChannelProfile = "business" | "crypto";
 
 /**
- * The default deliberately preserves the legacy/business behavior. PANKOFF
- * enables its editorial rules explicitly with CHANNEL_PROFILE=crypto.
+ * The default deliberately preserves the legacy/business behavior.
+ * PANKOFF may be configured with either CHANNEL_PROFILE=crypto or the older
+ * CONTENT_PROFILE=crypto variable used by the existing Railway service.
  */
 export function getChannelProfile(): ChannelProfile {
-  const value = process.env.CHANNEL_PROFILE?.trim().toLowerCase();
+  const value = (process.env.CHANNEL_PROFILE ?? process.env.CONTENT_PROFILE ?? "")
+    .trim()
+    .toLowerCase();
   return value === "crypto" || value === "pankoff_crypto" ? "crypto" : "business";
 }
 
