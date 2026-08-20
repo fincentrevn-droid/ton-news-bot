@@ -1,0 +1,29 @@
+name: PANKOFF Production Check
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CONTENT_PROFILE: crypto
+      OPENAI_MODEL: gpt-5.6-luna
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Apply PANKOFF runtime patch
+        run: node scripts/patch-pankoff-footer.mjs
+      - name: Typecheck libraries
+        run: pnpm run typecheck:libs
+      - name: Build API
+        run: pnpm --filter @workspace/api-server run build
+      - name: Build dashboard
+        run: pnpm --filter @workspace/dashboard run build
