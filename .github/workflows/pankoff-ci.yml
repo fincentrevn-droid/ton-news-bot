@@ -21,8 +21,10 @@ jobs:
           node-version: '24'
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - name: Apply PANKOFF runtime patch
-        run: node scripts/patch-pankoff-footer.mjs
+      - name: Apply PANKOFF runtime patches
+        run: |
+          node scripts/patch-pankoff-footer.mjs
+          node scripts/patch-pankoff-hardening-2.mjs
       - name: Typecheck libraries
         run: pnpm run typecheck:libs
       - name: Build API
