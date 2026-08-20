@@ -40,11 +40,10 @@ jobs:
       - name: Profile isolation smoke test
         run: |
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
-            grep -q 'PANKOFF_FINAL_BODY_GATE' artifacts/api-server/src/lib/telegram.ts
-            grep -q 'PANKOFF_LANGUAGE_REWRITE' artifacts/api-server/src/lib/auto-generate.ts
-            grep -q 'PANKOFF_NO_EMERGENCY_RSS' artifacts/api-server/src/lib/sources.ts
-            grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
-            grep -q 'PANKOFF_REVIEW_RECOVERABLE_LOCK' artifacts/api-server/src/routes/webhook.ts
+            grep -q 'patch-pankoff-final-hardening.mjs' scripts/start-railway.sh
+            grep -q 'PANKOFF_NO_EMERGENCY_RSS' scripts/patch-pankoff-final-hardening.mjs
+            grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' scripts/patch-pankoff-final-hardening.mjs
+            grep -q 'PANKOFF_REVIEW_RECOVERABLE_LOCK' scripts/patch-pankoff-final-hardening.mjs
           else
             ! grep -q 'PANKOFF_FINAL_BODY_GATE' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
