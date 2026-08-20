@@ -33,6 +33,18 @@ if [ "${CONTENT_PROFILE:-}" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" 
   fi
 fi
 
+# GPT-5.6 Luna only supports the default temperature. The existing shared
+# OpenAI module still contains explicit temperatures for generation, QC and
+# rewrite. Patch only the PANKOFF crypto runtime using Luna, then rebuild the
+# API bundle so production does not send unsupported temperature values.
+if [ "${CONTENT_PROFILE:-}" = "crypto" ] && [ "${OPENAI_MODEL:-}" = "gpt-5.6-luna" ]; then
+  if grep -q "^[[:space:]]*temperature:" artifacts/api-server/src/lib/openai.ts; then
+    sed -i '/^[[:space:]]*temperature:/d' artifacts/api-server/src/lib/openai.ts
+    echo "Removed unsupported temperature overrides for PANKOFF gpt-5.6-luna"
+    pnpm --filter @workspace/api-server run build
+  fi
+fi
+
 if [ -n "${DATABASE_URL:-}" ]; then
   pnpm --filter @workspace/db run push-force
 fi
