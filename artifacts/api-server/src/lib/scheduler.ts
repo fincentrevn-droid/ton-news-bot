@@ -4,6 +4,8 @@ import { sendTelegramMessage, sendPhotoPost, notifyOwner } from "./telegram";
 import { checkAiLimitReached, getOrCreateTodayUsage, getSettings } from "./openai";
 import { generateAndQueuePost } from "./auto-generate";
 import { logger } from "./logger";
+import { isCryptoProfile } from "./channel-profile";
+import { assessCryptoPublicBody, cryptoSourceAgeHours } from "./crypto-policy";
 
 // ─── Time helpers ────────────────────────────────────────────────────────────
 
@@ -70,34 +72,37 @@ function passesAutoPublishQuality(post: {
   safetyStatus: string | null;
   generatedFromSource: boolean | null;
   content: string;
+  sourceDate: Date | null;
   qualityScore: number | null;
-  qualityCheckPassed: boolean | null;
   safeForAutopublish: boolean | null;
 }): boolean {
   if (!post.generatedFromSource) return false;
   if (post.confidence === "low") return false;
-  if (post.safetyStatus !== "ok") return false;
-  const minQualityScore = parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "90", 10);
-  if (post.qualityCheckPassed !== true) return false;
-  if (post.safeForAutopublish !== true) return false;
-  if ((post.qualityScore ?? 0) < minQualityScore) return false;
+  if (post.safetyStatus === "rejected") return false; // "flagged" = links stripped but ok
   if (!post.content.trim()) return false;
+
+  if (isCryptoProfile()) {
+    const qualityThreshold = Number.parseInt(process.env.QUALITY_CHECK_MIN_SCORE ?? "85", 10);
+    const sourceAgeMs = cryptoSourceAgeHours() * 60 * 60 * 1000;
+    const sourceIsFresh = Boolean(
+      post.sourceDate && Date.now() - new Date(post.sourceDate).getTime() <= sourceAgeMs,
+    );
+    return Boolean(
+      sourceIsFresh
+      && post.qualityScore !== null
+      && post.qualityScore >= qualityThreshold
+      && post.safeForAutopublish
+      && assessCryptoPublicBody(post.content).accepted,
+    );
+  }
+
   return true;
 }
 
 // ─── Auto-generation cooldown (in-memory, resets on restart) ─────────────────
 
-let nextAutoGenerateAttemptMs = 0;
+let lastAutoGenerateAttemptMs = 0;
 let autoGenerateInProgress = false;
-
-const configuredRetryMinutes = Number.parseInt(
-  process.env.AUTO_GENERATE_RETRY_MINUTES ?? "30",
-  10,
-);
-const AUTO_GENERATE_RETRY_MINUTES =
-  Number.isFinite(configuredRetryMinutes) && configuredRetryMinutes >= 5
-    ? configuredRetryMinutes
-    : 30;
 
 // ─── Main tick ───────────────────────────────────────────────────────────────
 
@@ -150,10 +155,7 @@ export async function tickPublisher(): Promise<void> {
 
     if (!post) {
       // Queue is empty — trigger auto-generation if cooldown has passed
-      await maybeAutoGenerate(
-        schedule.id,
-        schedule.minMinutesBetweenPosts,
-      );
+      await maybeAutoGenerate(schedule.minMinutesBetweenPosts);
       return;
     }
 
@@ -162,12 +164,23 @@ export async function tickPublisher(): Promise<void> {
 
     let messageId: number;
     let newFileId: string | null = post.mediaFileId ?? null;
+    const canPublishPhoto = Boolean(
+      post.hasMedia
+      && post.mediaFileId
+      && (!isCryptoProfile() || post.mediaDownloadStatus === "visual_safe"),
+    );
 
-    if (post.hasMedia && post.mediaFileId) {
+    if (canPublishPhoto && post.mediaFileId) {
       const result = await sendPhotoPost(post.mediaFileId, post.content);
       messageId = result.messageId;
       newFileId = result.fileId || post.mediaFileId;
     } else {
+      if (isCryptoProfile() && post.hasMedia) {
+        logger.warn(
+          { postId: post.id, mediaDownloadStatus: post.mediaDownloadStatus },
+          "Crypto post media lacks successful visual scan — publishing text only",
+        );
+      }
       messageId = await sendTelegramMessage(post.content);
     }
 
@@ -196,19 +209,18 @@ export async function tickPublisher(): Promise<void> {
  * Trigger a background post generation when the queue is empty.
  * Uses a per-process cooldown to avoid generating on every 2-min tick.
  */
-async function maybeAutoGenerate(
-  scheduleId: number,
-  minMinutesBetweenPosts: number,
-): Promise<void> {
+async function maybeAutoGenerate(minMinutesBetweenPosts: number): Promise<void> {
   if (autoGenerateInProgress) {
     logger.debug("Scheduler: generation already in progress — skipping");
     return;
   }
 
-  const now = Date.now();
-  if (nextAutoGenerateAttemptMs > now) {
+  // Cooldown: wait at least minMinutesBetweenPosts between generation attempts
+  const cooldownMs = Math.max(minMinutesBetweenPosts, 75) * 60 * 1000;
+  const elapsed = Date.now() - lastAutoGenerateAttemptMs;
+  if (lastAutoGenerateAttemptMs > 0 && elapsed < cooldownMs) {
     logger.debug(
-      { retryInMin: Math.ceil((nextAutoGenerateAttemptMs - now) / 60000) },
+      { elapsedMin: Math.round(elapsed / 60000), cooldownMin: Math.round(cooldownMs / 60000) },
       "Scheduler: generation cooldown active",
     );
     return;
@@ -228,62 +240,20 @@ async function maybeAutoGenerate(
     return;
   }
 
-  const startedAt = new Date();
+  lastAutoGenerateAttemptMs = Date.now();
   autoGenerateInProgress = true;
   logger.info("Scheduler: queue empty — triggering auto-generation");
 
   generateAndQueuePost(notifyOwner)
-    .then(async (result) => {
-      const cooldownMinutes = result
-        ? Math.max(minMinutesBetweenPosts, 75)
-        : AUTO_GENERATE_RETRY_MINUTES;
-      nextAutoGenerateAttemptMs = Date.now() + cooldownMinutes * 60 * 1000;
-
-      await db
-        .update(schedulesTable)
-        .set({
-          lastRunAt: startedAt,
-          nextRunAt: new Date(nextAutoGenerateAttemptMs),
-        })
-        .where(eq(schedulesTable.id, scheduleId));
-
+    .then((result) => {
       if (result) {
-        logger.info(
-          {
-            postId: result.postId,
-            queued: result.queued,
-            qc: result.qualityScore,
-            nextAttemptInMin: cooldownMinutes,
-          },
-          "Scheduler: auto-generation completed",
-        );
+        logger.info({ postId: result.postId, queued: result.queued, qc: result.qualityScore }, "Scheduler: auto-generation completed");
       } else {
-        logger.info(
-          { nextAttemptInMin: cooldownMinutes },
-          "Scheduler: auto-generation returned no post; short retry scheduled",
-        );
+        logger.info("Scheduler: auto-generation returned no post (no sources or all NO_POST)");
       }
     })
-    .catch(async (err) => {
-      nextAutoGenerateAttemptMs =
-        Date.now() + AUTO_GENERATE_RETRY_MINUTES * 60 * 1000;
-
-      try {
-        await db
-          .update(schedulesTable)
-          .set({
-            lastRunAt: startedAt,
-            nextRunAt: new Date(nextAutoGenerateAttemptMs),
-          })
-          .where(eq(schedulesTable.id, scheduleId));
-      } catch (scheduleErr) {
-        logger.error({ err: scheduleErr }, "Scheduler: failed to store retry time");
-      }
-
-      logger.error(
-        { err, nextAttemptInMin: AUTO_GENERATE_RETRY_MINUTES },
-        "Scheduler: auto-generation failed; short retry scheduled",
-      );
+    .catch((err) => {
+      logger.error({ err }, "Scheduler: auto-generation failed");
     })
     .finally(() => {
       autoGenerateInProgress = false;

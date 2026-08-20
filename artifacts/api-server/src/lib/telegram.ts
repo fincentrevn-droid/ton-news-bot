@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { isCryptoProfile } from "./channel-profile";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -31,51 +32,6 @@ async function telegramPost(token: string, method: string, body: unknown): Promi
   return res.json();
 }
 
-/**
- * Fail closed before starting the scheduler: the configured bot must be an
- * administrator of the target channel with permission to publish messages.
- */
-export async function verifyPublishingAccess(): Promise<void> {
-  const token = getBotToken();
-  const chatId = getChannelId();
-
-  const me = await telegramPost(token, "getMe", {}) as {
-    ok: boolean;
-    result?: { id: number; username?: string };
-    description?: string;
-  };
-  if (!me.ok || !me.result?.id) {
-    throw new Error(`Telegram getMe failed: ${me.description ?? "unknown error"}`);
-  }
-
-  const member = await telegramPost(token, "getChatMember", {
-    chat_id: chatId,
-    user_id: me.result.id,
-  }) as {
-    ok: boolean;
-    result?: { status?: string; can_post_messages?: boolean };
-    description?: string;
-  };
-  if (!member.ok) {
-    throw new Error(`Telegram channel access check failed: ${member.description ?? "unknown error"}`);
-  }
-
-  const status = member.result?.status;
-  const canPublish =
-    status === "creator" ||
-    (status === "administrator" && member.result?.can_post_messages === true);
-  if (!canPublish) {
-    throw new Error(
-      `Bot @${me.result.username ?? me.result.id} is not allowed to publish to ${chatId}`,
-    );
-  }
-
-  logger.info(
-    { channelId: chatId, botUsername: me.result.username, status },
-    "Telegram publishing access verified",
-  );
-}
-
 // ─── Multipart helper (for photo uploads) ───────────────────────────────────
 
 async function telegramMultipart(token: string, method: string, fields: Record<string, string>, photoBuffer: Buffer): Promise<unknown> {
@@ -96,17 +52,95 @@ function extractFileId(result: unknown): string {
   return photos?.at(-1)?.file_id ?? "";
 }
 
+const PANKOFF_FOOTER_LINKS = {
+  chat: "https://t.me/pankoff_chat",
+  x: "https://x.com/pankoffcrypto",
+  tg: "https://t.me/pankoff_crypto",
+  tt: "https://www.tiktok.com/@pankoff33",
+  instagram: "https://instagram.com/_pankoff",
+  youtube: "https://youtube.com/@pankoff33",
+} as const;
+
+function customEmoji(envName: string, fallback: string, useCustomEmoji: boolean): string {
+  const id = process.env[envName]?.trim();
+  if (
+    useCustomEmoji &&
+    process.env.TELEGRAM_CUSTOM_EMOJI_ENABLED !== "false" &&
+    id &&
+    /^\d+$/.test(id)
+  ) {
+    return `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>`;
+  }
+  return fallback;
+}
+
+function pankoffFooter(useCustomEmoji: boolean): string {
+  const chatIcon = customEmoji("PANKOFF_FOOTER_CHAT_EMOJI_ID", "🟢", useCustomEmoji);
+  const xIcon = customEmoji("PANKOFF_FOOTER_X_EMOJI_ID", "𝕏", useCustomEmoji);
+  const tgIcon = customEmoji("PANKOFF_FOOTER_TG_EMOJI_ID", "✈️", useCustomEmoji);
+  const ttIcon = customEmoji("PANKOFF_FOOTER_TT_EMOJI_ID", "♪", useCustomEmoji);
+  const instagramIcon = customEmoji("PANKOFF_FOOTER_IN_EMOJI_ID", "◉", useCustomEmoji);
+  const youtubeIcon = customEmoji("PANKOFF_FOOTER_YT_EMOJI_ID", "▶️", useCustomEmoji);
+
+  return [
+    `<a href="${PANKOFF_FOOTER_LINKS.chat}">${chatIcon} Чат</a>`,
+    `<a href="${PANKOFF_FOOTER_LINKS.x}">${xIcon} X</a>`,
+    `<a href="${PANKOFF_FOOTER_LINKS.tg}">${tgIcon} TG</a>`,
+    `<a href="${PANKOFF_FOOTER_LINKS.tt}">${ttIcon} TT</a>`,
+    `<a href="${PANKOFF_FOOTER_LINKS.instagram}">${instagramIcon} IN</a>`,
+    `<a href="${PANKOFF_FOOTER_LINKS.youtube}">${youtubeIcon} YT</a>`,
+  ].join(" · ");
+}
+
+function truncatePlainText(text: string, maxChars: number): string {
+  const chars = Array.from(text.trim());
+  if (chars.length <= maxChars) return chars.join("");
+  return `${chars.slice(0, Math.max(1, maxChars - 1)).join("").trimEnd()}…`;
+}
+
+function publicPostHtml(text: string, maxVisibleChars: number, useCustomEmoji = true): string {
+  // Preserve the legacy publisher byte-for-byte for the business profile.
+  if (!isCryptoProfile()) {
+    return maxVisibleChars === 1024 ? escapeHtml(text).slice(0, 1024) : escapeHtml(text);
+  }
+
+  // Caption/text limits are evaluated by Telegram after HTML entities are
+  // resolved. The body stays separate from the footer for QC and storage.
+  const visibleFooter = "🟢 Чат · 𝕏 X · ✈️ TG · ♪ TT · ◉ IN · ▶️ YT";
+  const bodyLimit = Math.max(1, maxVisibleChars - visibleFooter.length - 2);
+  return `${escapeHtml(truncatePlainText(text, bodyLimit))}\n\n${pankoffFooter(useCustomEmoji)}`;
+}
+
+function usesCustomFooterEmoji(): boolean {
+  return isCryptoProfile()
+    && process.env.TELEGRAM_CUSTOM_EMOJI_ENABLED !== "false"
+    && [
+      "PANKOFF_FOOTER_CHAT_EMOJI_ID",
+      "PANKOFF_FOOTER_X_EMOJI_ID",
+      "PANKOFF_FOOTER_TG_EMOJI_ID",
+      "PANKOFF_FOOTER_TT_EMOJI_ID",
+      "PANKOFF_FOOTER_IN_EMOJI_ID",
+      "PANKOFF_FOOTER_YT_EMOJI_ID",
+    ].some((name) => /^\d+$/.test(process.env[name]?.trim() ?? ""));
+}
+
 // ─── Text publish ────────────────────────────────────────────────────────────
 
 export async function sendTelegramMessage(text: string): Promise<number> {
   const token = getBotToken();
   const chatId = getChannelId();
 
-  const data = await telegramPost(token, "sendMessage", {
+  const send = async (useCustomEmoji: boolean) => telegramPost(token, "sendMessage", {
     chat_id: chatId,
-    text: escapeHtml(text),
+    text: publicPostHtml(text, 4096, useCustomEmoji),
     parse_mode: "HTML",
-  }) as { ok: boolean; result?: { message_id: number }; description?: string };
+  }) as Promise<{ ok: boolean; result?: { message_id: number }; description?: string }>;
+
+  let data = await send(true);
+  if (!data.ok && usesCustomFooterEmoji()) {
+    logger.warn({ description: data.description }, "Custom footer emoji failed — retrying with Unicode");
+    data = await send(false);
+  }
 
   if (!data.ok) {
     logger.error({ description: data.description }, "Telegram sendMessage failed");
@@ -135,23 +169,29 @@ export async function sendPhotoPost(
 ): Promise<PhotoPublishResult> {
   const token = getBotToken();
   const chatId = getChannelId();
-  const safeCaption = escapeHtml(caption).slice(0, 1024);
 
-  let data: { ok: boolean; result?: unknown; description?: string };
+  const send = async (useCustomEmoji: boolean): Promise<{ ok: boolean; result?: unknown; description?: string }> => {
+    const safeCaption = publicPostHtml(caption, 1024, useCustomEmoji);
 
-  if (typeof photoSource === "string") {
-    data = await telegramPost(token, "sendPhoto", {
+    if (typeof photoSource === "string") {
+      return telegramPost(token, "sendPhoto", {
+        chat_id: chatId,
+        photo: photoSource,
+        caption: safeCaption,
+        parse_mode: "HTML",
+      }) as Promise<{ ok: boolean; result?: unknown; description?: string }>;
+    }
+    return telegramMultipart(token, "sendPhoto", {
       chat_id: chatId,
-      photo: photoSource,
       caption: safeCaption,
       parse_mode: "HTML",
-    }) as typeof data;
-  } else {
-    data = await telegramMultipart(token, "sendPhoto", {
-      chat_id: chatId,
-      caption: safeCaption,
-      parse_mode: "HTML",
-    }, photoSource) as typeof data;
+    }, photoSource) as Promise<{ ok: boolean; result?: unknown; description?: string }>;
+  };
+
+  let data = await send(true);
+  if (!data.ok && usesCustomFooterEmoji()) {
+    logger.warn({ description: data.description }, "Custom footer emoji failed for photo — retrying with Unicode");
+    data = await send(false);
   }
 
   if (!data.ok) {
@@ -383,11 +423,11 @@ export async function notifyOwner(message: string): Promise<void> {
 export async function setupBotCommands(): Promise<void> {
   const token = getBotToken();
   const commands = [
-    { command: "status", description: "Статус публікацій та AI-викликів сьогодні" },
-    { command: "generate_now", description: "Запустити пошук і перевірку матеріалу" },
-    { command: "sources", description: "Показати активні джерела" },
-    { command: "costs", description: "AI-витрати сьогодні" },
-    { command: "help", description: "Показати команди" },
+    { command: "status", description: "Статус: посты, публикации, AI-вызовы сегодня" },
+    { command: "generate_now", description: "Запустить генерацию поста вручную" },
+    { command: "sources", description: "Показать активные источники" },
+    { command: "costs", description: "AI-расходы сегодня" },
+    { command: "help", description: "Показать команды" },
   ];
 
   const data = await telegramPost(token, "setMyCommands", { commands }) as { ok: boolean };
