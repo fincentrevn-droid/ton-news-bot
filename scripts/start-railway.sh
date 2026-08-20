@@ -3,6 +3,12 @@ set -e
 
 PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-}}"
 
+# Railway normally injects PORT, but runtime rebuilds must not depend on optional env vars.
+# Vite requires both PORT and BASE_PATH, so provide safe production defaults here.
+export PORT="${PORT:-3000}"
+export BASE_PATH="${BASE_PATH:-/}"
+export NODE_ENV="${NODE_ENV:-production}"
+
 # PANKOFF CRYPTO may use a Telethon StringSession copied without trailing base64 padding.
 # GramJS detects Telethon IPv4 sessions by the encoded body length, so normalize only
 # when the payload safely decodes to the expected Telethon IPv4 structure (263 bytes).
