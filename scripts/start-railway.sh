@@ -53,6 +53,7 @@ if [ "$PROFILE" = "crypto" ]; then
   node scripts/patch-pankoff-hardening-2.mjs
   node scripts/patch-pankoff-style-v2.mjs
   node scripts/patch-pankoff-publish-recovery.mjs
+  node scripts/patch-pankoff-final-hardening.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
