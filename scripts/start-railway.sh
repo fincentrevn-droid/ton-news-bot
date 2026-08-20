@@ -42,11 +42,10 @@ if [ "$PROFILE" = "crypto" ]; then
     echo "Removed unsupported temperature overrides for PANKOFF gpt-5.6-luna"
   fi
 
-  # Apply PANKOFF-only footer formatting and dashboard final-post preview.
+  # Apply PANKOFF-only runtime hardening before rebuilding production bundles.
   node scripts/patch-pankoff-footer.mjs
+  node scripts/patch-pankoff-hardening-2.mjs
 
-  # The Railway image was built before the runtime profile-specific patch, so
-  # rebuild only the two affected bundles for the crypto service.
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
 fi
