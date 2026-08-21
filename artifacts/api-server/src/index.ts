@@ -1,7 +1,8 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { setupBotCommands, setWebhook } from "./lib/telegram";
-import { startSchedulerLoop } from "./lib/scheduler";
+import { startSchedulerLoop, tickPublisher } from "./lib/scheduler";
+import { reconcileScheduleFromEnv } from "./lib/runtime-schedule";
 import { db, sourcesTable } from "@workspace/db";
 import { sql, eq } from "drizzle-orm";
 import { isCryptoProfile, PANKOFF_CRYPTO_DEFAULT_SOURCES } from "./lib/channel-profile";
@@ -74,7 +75,15 @@ app.listen(port, (err) => {
 
   seedSourcesIfEmpty().catch((err) => logger.warn({ err }, "Source seeding failed"));
   removeAutoSeededRss().catch((err) => logger.warn({ err }, "RSS cleanup failed"));
+
+  // Start the long-running loop immediately, then reconcile Railway env with
+  // persisted DB state and perform one first tick. This prevents a healthy
+  // deployment from sitting idle when AUTO_PUBLISH/SCHEDULE_ENABLED in Railway
+  // disagree with an older schedules row.
   startSchedulerLoop();
+  reconcileScheduleFromEnv()
+    .then(() => tickPublisher())
+    .catch((startupErr) => logger.error({ startupErr }, "Posting scheduler startup reconciliation failed"));
 
   // Auto-register Telegram webhook on startup.
   const domain =
