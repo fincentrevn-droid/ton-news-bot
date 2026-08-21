@@ -59,10 +59,11 @@ if [ "$PROFILE" = "crypto" ]; then
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
 else
-  # FINCENTRE BUSINESS has its own anti-stall hardening. It restores the
-  # business candidate rotation and regulatory-news eligibility without
-  # touching the PANKOFF profile.
+  # FINCENTRE BUSINESS has its own anti-stall hardening and schedule self-heal.
+  # If legacy Railway env does not explicitly define posting switches, the
+  # unattended business service must still start with schedule + autopublish ON.
   node scripts/patch-fincentre-stall-v2.mjs
+  node scripts/patch-fincentre-schedule-defaults.mjs
   pnpm --filter @workspace/api-server run build
 fi
 
