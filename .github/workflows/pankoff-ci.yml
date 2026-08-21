@@ -43,6 +43,7 @@ jobs:
         run: |
           node scripts/patch-fincentre-stall-v2.mjs
           node scripts/patch-fincentre-schedule-defaults.mjs
+          node scripts/patch-fincentre-editorial-v1.mjs
       - name: Profile isolation smoke test
         run: |
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
@@ -60,7 +61,9 @@ jobs:
             grep -q '@tax_gov_ua' artifacts/api-server/src/index.ts
             grep -q '@nbu_ua' artifacts/api-server/src/index.ts
             grep -q 'isBusiness ? true : undefined' artifacts/api-server/src/lib/runtime-schedule.ts
-            grep -q 'patch-fincentre-schedule-defaults.mjs' scripts/start-railway.sh
+            grep -q 'FINCENTRE BUSINESS (ЦФЮК)' artifacts/api-server/src/lib/openai.ts
+            grep -q 'opts.content.trim().length < 80' artifacts/api-server/src/lib/auto-generate.ts
+            grep -q 'patch-fincentre-editorial-v1.mjs' scripts/start-railway.sh
             ! grep -q 'PANKOFF_FINAL_BODY_GATE' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
           fi

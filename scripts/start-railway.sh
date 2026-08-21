@@ -59,11 +59,11 @@ if [ "$PROFILE" = "crypto" ]; then
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
 else
-  # FINCENTRE BUSINESS has its own anti-stall hardening and schedule self-heal.
-  # If legacy Railway env does not explicitly define posting switches, the
-  # unattended business service must still start with schedule + autopublish ON.
+  # FINCENTRE BUSINESS has its own anti-stall hardening, schedule self-heal and
+  # Ukrainian business editorial prompt. These patches are business-only.
   node scripts/patch-fincentre-stall-v2.mjs
   node scripts/patch-fincentre-schedule-defaults.mjs
+  node scripts/patch-fincentre-editorial-v1.mjs
   pnpm --filter @workspace/api-server run build
 fi
 
