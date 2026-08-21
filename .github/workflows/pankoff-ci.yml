@@ -38,9 +38,11 @@ jobs:
           node scripts/patch-pankoff-publish-recovery.mjs
           node scripts/patch-pankoff-final-hardening.mjs
           node scripts/patch-pankoff-disable-footer.mjs
-      - name: Apply FINCENTRE runtime patch
+      - name: Apply FINCENTRE runtime patches
         if: matrix.profile == 'business'
-        run: node scripts/patch-fincentre-stall-v2.mjs
+        run: |
+          node scripts/patch-fincentre-stall-v2.mjs
+          node scripts/patch-fincentre-schedule-defaults.mjs
       - name: Profile isolation smoke test
         run: |
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
@@ -50,13 +52,14 @@ jobs:
             grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_REVIEW_RECOVERABLE_LOCK' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_SOCIAL_FOOTER_DISABLED' artifacts/api-server/src/lib/telegram.ts
-            ! grep -q 'PANKOFF_FOOTER_PREVIEW' artifacts/dashboard/src/pages/posts.tsx
             ! grep -q 'FINCENTRE_NO_POST_TTL_MS' artifacts/api-server/src/lib/auto-generate.ts
           else
             grep -q 'FINCENTRE_NO_POST_TTL_MS' artifacts/api-server/src/lib/auto-generate.ts
             grep -q 'MIN_BUSINESS_RELEVANCE_SCORE = 1' artifacts/api-server/src/lib/business-filter.ts
             grep -q '@tax_gov_ua' artifacts/api-server/src/index.ts
             grep -q '@nbu_ua' artifacts/api-server/src/index.ts
+            grep -q 'isBusiness ? true : undefined' artifacts/api-server/src/lib/runtime-schedule.ts
+            grep -q 'patch-fincentre-schedule-defaults.mjs' scripts/start-railway.sh
             ! grep -q 'PANKOFF_FINAL_BODY_GATE' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
           fi
