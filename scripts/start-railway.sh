@@ -58,6 +58,12 @@ if [ "$PROFILE" = "crypto" ]; then
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
+else
+  # FINCENTRE BUSINESS has its own anti-stall hardening. It restores the
+  # business candidate rotation and regulatory-news eligibility without
+  # touching the PANKOFF profile.
+  node scripts/patch-fincentre-stall-v2.mjs
+  pnpm --filter @workspace/api-server run build
 fi
 
 if [ -n "${DATABASE_URL:-}" ]; then
