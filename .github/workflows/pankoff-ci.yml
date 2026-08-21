@@ -52,6 +52,7 @@ jobs:
             grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_REVIEW_RECOVERABLE_LOCK' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_SOCIAL_FOOTER_DISABLED' artifacts/api-server/src/lib/telegram.ts
+            ! grep -q 'PANKOFF_FOOTER_PREVIEW' artifacts/dashboard/src/pages/posts.tsx
             ! grep -q 'FINCENTRE_NO_POST_TTL_MS' artifacts/api-server/src/lib/auto-generate.ts
           else
             grep -q 'FINCENTRE_NO_POST_TTL_MS' artifacts/api-server/src/lib/auto-generate.ts
