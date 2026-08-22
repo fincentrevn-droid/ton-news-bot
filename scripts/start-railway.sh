@@ -54,8 +54,9 @@ if [ "$PROFILE" = "crypto" ]; then
   node scripts/patch-pankoff-final-hardening.mjs
   node scripts/patch-pankoff-disable-footer.mjs
 
-  # Shared final pass: deep queue scan + fast recovery from empty/error cycles.
+  # Shared reliability and final AI-output safety barriers.
   node scripts/patch-autopost-reliability.mjs
+  node scripts/patch-ai-output-safety.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
@@ -66,8 +67,9 @@ else
   node scripts/patch-fincentre-schedule-defaults.mjs
   node scripts/patch-fincentre-editorial-v1.mjs
 
-  # Shared final pass: deep queue scan + fast recovery from empty/error cycles.
+  # Shared reliability and final AI-output safety barriers.
   node scripts/patch-autopost-reliability.mjs
+  node scripts/patch-ai-output-safety.mjs
 
   pnpm --filter @workspace/api-server run build
 fi
