@@ -54,9 +54,10 @@ if [ "$PROFILE" = "crypto" ]; then
   node scripts/patch-pankoff-final-hardening.mjs
   node scripts/patch-pankoff-disable-footer.mjs
 
-  # Shared reliability and final AI-output safety barriers.
+  # Shared reliability, output safety and QC structured-output resilience.
   node scripts/patch-autopost-reliability.mjs
   node scripts/patch-ai-output-safety.mjs
+  node scripts/patch-quality-check-resilience.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
@@ -67,9 +68,10 @@ else
   node scripts/patch-fincentre-schedule-defaults.mjs
   node scripts/patch-fincentre-editorial-v1.mjs
 
-  # Shared reliability and final AI-output safety barriers.
+  # Shared reliability, output safety and QC structured-output resilience.
   node scripts/patch-autopost-reliability.mjs
   node scripts/patch-ai-output-safety.mjs
+  node scripts/patch-quality-check-resilience.mjs
 
   # Final business-only publisher pass: restore @fincentre_business and expose
   # a one-shot production autopublish test without changing normal intervals.
