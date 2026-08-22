@@ -9,6 +9,10 @@ export PORT="${PORT:-3000}"
 export BASE_PATH="${BASE_PATH:-/}"
 export NODE_ENV="${NODE_ENV:-production}"
 
+# Keep OpenAI request parameters compatible for both Railway services.
+# Luna rejects explicit temperature overrides; prompts/QC define editorial style.
+node scripts/patch-openai-default-temperature.mjs
+
 # PANKOFF CRYPTO may use a Telethon StringSession copied without trailing base64 padding.
 # GramJS detects Telethon IPv4 sessions by the encoded body length, so normalize only
 # when the payload safely decodes to the expected Telethon IPv4 structure (263 bytes).
@@ -42,12 +46,6 @@ if [ "$PROFILE" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" ]; then
 fi
 
 if [ "$PROFILE" = "crypto" ]; then
-  # GPT-5.6 Luna only supports its default temperature.
-  if [ "${OPENAI_MODEL:-}" = "gpt-5.6-luna" ] && grep -q "^[[:space:]]*temperature:" artifacts/api-server/src/lib/openai.ts; then
-    sed -i '/^[[:space:]]*temperature:/d' artifacts/api-server/src/lib/openai.ts
-    echo "Removed unsupported temperature overrides for PANKOFF gpt-5.6-luna"
-  fi
-
   # Apply PANKOFF-only runtime hardening and editorial style before rebuilding production bundles.
   node scripts/patch-pankoff-footer.mjs
   node scripts/patch-pankoff-hardening-2.mjs

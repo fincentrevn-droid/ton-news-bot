@@ -29,6 +29,10 @@ jobs:
         run: sh scripts/railway-startup-smoke.sh
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Apply shared OpenAI compatibility patch
+        run: |
+          node scripts/patch-openai-default-temperature.mjs
+          ! grep -q '^[[:space:]]*temperature:' artifacts/api-server/src/lib/openai.ts
       - name: Apply PANKOFF runtime patches
         if: matrix.profile == 'crypto'
         run: |
@@ -46,6 +50,8 @@ jobs:
           node scripts/patch-fincentre-editorial-v1.mjs
       - name: Profile isolation smoke test
         run: |
+          grep -q 'patch-openai-default-temperature.mjs' scripts/start-railway.sh
+          ! grep -q '^[[:space:]]*temperature:' artifacts/api-server/src/lib/openai.ts
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
             grep -q 'patch-pankoff-final-hardening.mjs' scripts/start-railway.sh
             grep -q 'patch-pankoff-disable-footer.mjs' scripts/start-railway.sh
