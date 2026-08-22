@@ -130,12 +130,22 @@ await patch(
   "artifacts/api-server/src/lib/auto-generate.ts",
   (input) => {
     if (input.includes("AI_FORMAT_ERROR_SOURCE_SKIP")) return input;
-    const oldCatch = `      if (err instanceof Error && err.message === "NO_POST") {
+
+    const simpleOld = `      if (err instanceof Error && err.message === "NO_POST") {
         logger.info({ channel: candidate.channel }, "Source returned NO_POST — trying next");
         skippedHashes.add(candidate.textHash);
         continue;
       }`;
-    const newCatch = `      // AI_FORMAT_ERROR_SOURCE_SKIP: malformed structured output is never public.
+    const businessOld = `      if (err instanceof Error && err.message === "NO_POST") {
+        logger.info({ channel: candidate.channel }, "Source returned NO_POST — trying next");
+        if (!cryptoProfile) {
+          fincentreNoPostUntil.set(candidate.textHash, Date.now() + FINCENTRE_NO_POST_TTL_MS);
+        }
+        skippedHashes.add(candidate.textHash);
+        continue;
+      }`;
+
+    const commonNew = `      // AI_FORMAT_ERROR_SOURCE_SKIP: malformed structured output is never public.
       if (err instanceof Error && (err.message === "NO_POST" || err.message === "AI_FORMAT_ERROR")) {
         logger.info(
           { channel: candidate.channel, reason: err.message },
@@ -146,8 +156,25 @@ await patch(
         skippedHashes.add(candidate.textHash);
         continue;
       }`;
-    if (!input.includes(oldCatch)) throw new Error("auto-generate candidate catch block not found");
-    return input.replace(oldCatch, newCatch);
+
+    const businessNew = `      // AI_FORMAT_ERROR_SOURCE_SKIP: malformed structured output is never public.
+      if (err instanceof Error && (err.message === "NO_POST" || err.message === "AI_FORMAT_ERROR")) {
+        logger.info(
+          { channel: candidate.channel, reason: err.message },
+          err.message === "AI_FORMAT_ERROR"
+            ? "Source produced malformed structured output — trying next"
+            : "Source returned NO_POST — trying next",
+        );
+        if (!cryptoProfile && err.message === "NO_POST") {
+          fincentreNoPostUntil.set(candidate.textHash, Date.now() + FINCENTRE_NO_POST_TTL_MS);
+        }
+        skippedHashes.add(candidate.textHash);
+        continue;
+      }`;
+
+    if (input.includes(businessOld)) return input.replace(businessOld, businessNew);
+    if (input.includes(simpleOld)) return input.replace(simpleOld, commonNew);
+    throw new Error("auto-generate candidate catch block not found");
   },
   "Added malformed-output source skip",
 );
@@ -186,7 +213,6 @@ function assertPublicTelegramText(text: string): void {
   const token = getBotToken();`,
       );
     } else {
-      // PANKOFF runtime patch may insert its own gate before token resolution.
       s = s.replace(
         `export async function sendTelegramMessage(text: string): Promise<number> {`,
         `export async function sendTelegramMessage(text: string): Promise<number> {
