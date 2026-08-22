@@ -12,6 +12,9 @@ export NODE_ENV="${NODE_ENV:-production}"
 # Keep OpenAI request parameters compatible for both Railway services.
 # Luna rejects explicit temperature overrides; prompts/QC define editorial style.
 node scripts/patch-openai-default-temperature.mjs
+# Daily AI accounting must use the same Europe/Kyiv day as posting/news freshness.
+# Also repairs the legacy PANKOFF internal generated-post budget of 8 -> 12.
+node scripts/patch-local-day-accounting.mjs
 
 # PANKOFF CRYPTO may use a Telethon StringSession copied without trailing base64 padding.
 # GramJS detects Telethon IPv4 sessions by the encoded body length, so normalize only
