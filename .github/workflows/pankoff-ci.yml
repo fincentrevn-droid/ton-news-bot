@@ -48,10 +48,21 @@ jobs:
           node scripts/patch-fincentre-stall-v2.mjs
           node scripts/patch-fincentre-schedule-defaults.mjs
           node scripts/patch-fincentre-editorial-v1.mjs
-      - name: Profile isolation smoke test
+      - name: Apply shared autopost reliability patch
+        run: node scripts/patch-autopost-reliability.mjs
+      - name: Profile isolation and reliability smoke test
         run: |
           grep -q 'patch-openai-default-temperature.mjs' scripts/start-railway.sh
+          grep -q 'patch-autopost-reliability.mjs' scripts/start-railway.sh
           ! grep -q '^[[:space:]]*temperature:' artifacts/api-server/src/lib/openai.ts
+          grep -q 'AUTOPUBLISH_DEEP_QUEUE_SCAN' artifacts/api-server/src/lib/scheduler.ts
+          grep -q 'limit(100)' artifacts/api-server/src/lib/scheduler.ts
+          grep -q 'AUTO_GENERATE_ERROR_RETRY_MINUTES' artifacts/api-server/src/lib/scheduler.ts
+          grep -q 'generation failed; short retry scheduled' artifacts/api-server/src/lib/scheduler.ts
+          grep -q 'recommendedCalls = profile === "crypto" ? 80 : 60' artifacts/api-server/src/lib/runtime-schedule.ts
+          grep -q 'recommendedGeneratedPosts = profile === "crypto" ? 12 : 10' artifacts/api-server/src/lib/runtime-schedule.ts
+          grep -q 'default(60)' lib/db/src/schema/settings.ts
+          grep -q 'default(10)' lib/db/src/schema/settings.ts
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
             grep -q 'patch-pankoff-final-hardening.mjs' scripts/start-railway.sh
             grep -q 'patch-pankoff-disable-footer.mjs' scripts/start-railway.sh
