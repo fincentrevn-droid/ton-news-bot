@@ -59,6 +59,10 @@ if [ "$PROFILE" = "crypto" ]; then
   node scripts/patch-ai-output-safety.mjs
   node scripts/patch-quality-check-resilience.mjs
 
+  # Final PANKOFF pass: today-only Kyiv sources, event-first editorial style and
+  # an instant production Test Auto Publish button/endpoint.
+  node scripts/patch-pankoff-today-v3.mjs
+
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
 else
