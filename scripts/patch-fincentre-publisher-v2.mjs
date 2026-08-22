@@ -88,4 +88,26 @@ await patch(
   "Added FINCENTRE production autopublish test endpoint",
 );
 
+// Add a dashboard button that invokes the exact production test endpoint.
+await patch(
+  "artifacts/dashboard/src/pages/schedule.tsx",
+  (input) => {
+    if (input.includes("FINCENTRE_TEST_AUTOPUBLISH_BUTTON")) return input;
+    let s = input;
+    s = s.replace('import { useEffect } from "react";', 'import { useEffect, useState } from "react";');
+    const hookMarker = '  const { toast } = useToast();';
+    if (!s.includes(hookMarker)) throw new Error("schedule dashboard toast hook marker not found");
+    s = s.replace(
+      hookMarker,
+      `${hookMarker}\n  // FINCENTRE_TEST_AUTOPUBLISH_BUTTON\n  const [testingAutoPublish, setTestingAutoPublish] = useState(false);\n\n  const testAutoPublish = async () => {\n    setTestingAutoPublish(true);\n    try {\n      const response = await fetch("/api/schedule/test-autopublish", { method: "POST" });\n      const data = await response.json() as { success?: boolean; message?: string; postId?: number };\n      if (!response.ok || !data.success) throw new Error(data.message ?? "Autopublish test failed");\n      toast({ title: "Автопубликация работает", description: data.message });\n      queryClient.invalidateQueries({ queryKey: getGetScheduleQueryKey() });\n    } catch (err: unknown) {\n      const message = err instanceof Error ? err.message : "Autopublish test failed";\n      toast({ title: "Тест автопубликации не пройден", description: message, variant: "destructive" });\n    } finally {\n      setTestingAutoPublish(false);\n    }\n  };`,
+    );
+
+    const statusEnd = `                    <div className="flex justify-between items-center py-2">\n                      <span className="text-muted-foreground">Авто-публикация</span>\n                      <span className={schedule?.autoPublish ? "text-orange-500 font-bold" : "text-muted-foreground"}>\n                        {schedule?.autoPublish ? "ВКЛ" : "ВЫКЛ"}\n                      </span>\n                    </div>\n                  </CardContent>\n                </Card>\n\n                {/* ── Posting window`;
+    const statusWithButton = `                    <div className="flex justify-between items-center py-2">\n                      <span className="text-muted-foreground">Авто-публикация</span>\n                      <span className={schedule?.autoPublish ? "text-orange-500 font-bold" : "text-muted-foreground"}>\n                        {schedule?.autoPublish ? "ВКЛ" : "ВЫКЛ"}\n                      </span>\n                    </div>\n                  </CardContent>\n                  <CardFooter className="flex-col gap-2">\n                    <Button\n                      type="button"\n                      variant="outline"\n                      className="w-full"\n                      onClick={testAutoPublish}\n                      disabled={testingAutoPublish || !schedule?.enabled || !schedule?.autoPublish}\n                    >\n                      {testingAutoPublish ? "Проверяю автопубликацию..." : "Test Auto Publish"}\n                    </Button>\n                    <p className="text-xs text-muted-foreground">Один боевой тест: генерация + QC + публикация scheduler без ожидания обычного интервала.</p>\n                  </CardFooter>\n                </Card>\n\n                {/* ── Posting window`;
+    if (!s.includes(statusEnd)) throw new Error("schedule dashboard status card marker not found");
+    return s.replace(statusEnd, statusWithButton);
+  },
+  "Added FINCENTRE Test Auto Publish dashboard button",
+);
+
 console.log("FINCENTRE publisher/signature/autopublish-test patch complete");
