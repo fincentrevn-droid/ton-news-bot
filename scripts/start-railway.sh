@@ -46,13 +46,16 @@ if [ "$PROFILE" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" ]; then
 fi
 
 if [ "$PROFILE" = "crypto" ]; then
-  # Apply PANKOFF-only runtime hardening and editorial style before rebuilding production bundles.
+  # Apply PANKOFF-only runtime hardening and editorial style.
   node scripts/patch-pankoff-footer.mjs
   node scripts/patch-pankoff-hardening-2.mjs
   node scripts/patch-pankoff-style-v2.mjs
   node scripts/patch-pankoff-publish-recovery.mjs
   node scripts/patch-pankoff-final-hardening.mjs
   node scripts/patch-pankoff-disable-footer.mjs
+
+  # Shared final pass: deep queue scan + fast recovery from empty/error cycles.
+  node scripts/patch-autopost-reliability.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
@@ -62,6 +65,10 @@ else
   node scripts/patch-fincentre-stall-v2.mjs
   node scripts/patch-fincentre-schedule-defaults.mjs
   node scripts/patch-fincentre-editorial-v1.mjs
+
+  # Shared final pass: deep queue scan + fast recovery from empty/error cycles.
+  node scripts/patch-autopost-reliability.mjs
+
   pnpm --filter @workspace/api-server run build
 fi
 
