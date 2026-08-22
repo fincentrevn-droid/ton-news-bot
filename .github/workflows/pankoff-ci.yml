@@ -48,10 +48,11 @@ jobs:
           node scripts/patch-fincentre-stall-v2.mjs
           node scripts/patch-fincentre-schedule-defaults.mjs
           node scripts/patch-fincentre-editorial-v1.mjs
-      - name: Apply shared autopost reliability and output safety
+      - name: Apply shared reliability, output safety and QC resilience
         run: |
           node scripts/patch-autopost-reliability.mjs
           node scripts/patch-ai-output-safety.mjs
+          node scripts/patch-quality-check-resilience.mjs
       - name: Apply FINCENTRE final publisher patch
         if: matrix.profile == 'business'
         run: node scripts/patch-fincentre-publisher-v2.mjs
@@ -60,9 +61,13 @@ jobs:
           grep -q 'patch-openai-default-temperature.mjs' scripts/start-railway.sh
           grep -q 'patch-autopost-reliability.mjs' scripts/start-railway.sh
           grep -q 'patch-ai-output-safety.mjs' scripts/start-railway.sh
+          grep -q 'patch-quality-check-resilience.mjs' scripts/start-railway.sh
           ! grep -q '^[[:space:]]*temperature:' artifacts/api-server/src/lib/openai.ts
           grep -q 'AI_STRUCTURED_OUTPUT_REPAIR' artifacts/api-server/src/lib/openai.ts
           grep -q 'AI_FORMAT_ERROR' artifacts/api-server/src/lib/openai.ts
+          grep -q 'QC_STRUCTURED_OUTPUT_RESILIENCE' artifacts/api-server/src/lib/openai.ts
+          grep -q 'QC structured-output retry succeeded' artifacts/api-server/src/lib/openai.ts
+          grep -q 'max_completion_tokens: retry ? 900 : 800' artifacts/api-server/src/lib/openai.ts
           grep -q 'AI_FORMAT_ERROR_SOURCE_SKIP' artifacts/api-server/src/lib/auto-generate.ts
           grep -q 'RAW_AI_PAYLOAD_PUBLISH_GUARD' artifacts/api-server/src/lib/telegram.ts
           grep -q 'LEGACY_RAW_AI_DRAFT_SKIP' artifacts/api-server/src/lib/scheduler.ts
