@@ -59,9 +59,11 @@ jobs:
           node scripts/patch-autopost-reliability.mjs
           node scripts/patch-ai-output-safety.mjs
           node scripts/patch-quality-check-resilience.mjs
-      - name: Apply PANKOFF today/style/autotest final patch
+      - name: Apply PANKOFF today/style/autotest final patches
         if: matrix.profile == 'crypto'
-        run: node scripts/patch-pankoff-today-v3.mjs
+        run: |
+          node scripts/patch-pankoff-today-v3.mjs
+          node scripts/patch-pankoff-autotest-transport.mjs
       - name: Apply FINCENTRE final publisher patch
         if: matrix.profile == 'business'
         run: node scripts/patch-fincentre-publisher-v2.mjs
@@ -95,6 +97,7 @@ jobs:
             grep -q 'patch-pankoff-final-hardening.mjs' scripts/start-railway.sh
             grep -q 'patch-pankoff-disable-footer.mjs' scripts/start-railway.sh
             grep -q 'patch-pankoff-today-v3.mjs' scripts/start-railway.sh
+            grep -q 'patch-pankoff-autotest-transport.mjs' scripts/start-railway.sh
             grep -q 'PANKOFF_NO_EMERGENCY_RSS' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' scripts/patch-pankoff-final-hardening.mjs
             grep -q 'PANKOFF_REVIEW_RECOVERABLE_LOCK' scripts/patch-pankoff-final-hardening.mjs
@@ -108,6 +111,8 @@ jobs:
             grep -q 'PANKOFF_AUTOPUBLISH_TEST_FORCE' artifacts/api-server/src/lib/scheduler.ts
             grep -q 'PANKOFF_TEST_AUTOPUBLISH_ENDPOINT' artifacts/api-server/src/routes/schedule.ts
             grep -q 'PANKOFF_TEST_AUTOPUBLISH_BUTTON' artifacts/dashboard/src/pages/schedule.tsx
+            grep -q 'PANKOFF_AUTOTEST_TRANSPORT_PROBE' artifacts/api-server/src/lib/telegram.ts
+            grep -q 'PANKOFF_AUTOTEST_NO_NEWS_TRANSPORT' artifacts/api-server/src/routes/schedule.ts
             ! grep -q 'PANKOFF_FOOTER_PREVIEW' artifacts/dashboard/src/pages/posts.tsx
             ! grep -q 'FINCENTRE_NO_POST_TTL_MS' artifacts/api-server/src/lib/auto-generate.ts
             ! grep -q 'FINCENTRE_PUBLIC_SIGNATURE' artifacts/api-server/src/lib/telegram.ts
@@ -130,6 +135,7 @@ jobs:
             grep -q '@fincentre_business' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_EDITORIAL_V3_TODAY' artifacts/api-server/src/lib/openai.ts
             ! grep -q 'PANKOFF_AUTOPUBLISH_TEST_FORCE' artifacts/api-server/src/lib/scheduler.ts
+            ! grep -q 'PANKOFF_AUTOTEST_TRANSPORT_PROBE' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_FINAL_BODY_GATE' artifacts/api-server/src/lib/telegram.ts
             ! grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
           fi
