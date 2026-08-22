@@ -71,6 +71,10 @@ else
   node scripts/patch-autopost-reliability.mjs
   node scripts/patch-ai-output-safety.mjs
 
+  # Final business-only publisher pass: restore @fincentre_business and expose
+  # a one-shot production autopublish test without changing normal intervals.
+  node scripts/patch-fincentre-publisher-v2.mjs
+
   pnpm --filter @workspace/api-server run build
 fi
 
