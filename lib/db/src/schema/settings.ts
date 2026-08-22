@@ -5,8 +5,8 @@ import { z } from "zod/v4";
 export const settingsTable = pgTable("settings", {
   id: serial("id").primaryKey(),
   openaiModel: text("openai_model").notNull().default("gpt-4o"),
-  maxAiCallsPerDay: integer("max_ai_calls_per_day").notNull().default(12),
-  maxPostsPerDay: integer("max_posts_per_day").notNull().default(6),
+  maxAiCallsPerDay: integer("max_ai_calls_per_day").notNull().default(60),
+  maxPostsPerDay: integer("max_posts_per_day").notNull().default(10),
   minPostsPerDay: integer("min_posts_per_day").notNull().default(5),
   maxRewritePerPost: integer("max_rewrite_per_post").notNull().default(3),
   maxTokensPerPost: integer("max_tokens_per_post").notNull().default(1500),
