@@ -1,6 +1,7 @@
 import { db, schedulesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
+import { getChannelProfile } from "./channel-profile";
 
 function envBool(name: string): boolean | undefined {
   const raw = process.env[name];
@@ -32,6 +33,10 @@ function envString(name: string): string | undefined {
  * after a redeploy/new DB even while AUTO_PUBLISH=true in Railway, leaving the
  * service healthy but silently idle. Reconcile only explicitly configured env
  * values, preserving dashboard/DB values for fields that are not set in env.
+ *
+ * The same startup reconciliation also repairs the original AI budget defaults
+ * (12 calls / 6 generated posts), which are too small for a 6-8 post/day bot
+ * once generation, QC and occasional rewrites are counted separately.
  */
 export async function reconcileScheduleFromEnv(): Promise<void> {
   const explicitAutoPublish = envBool("AUTO_PUBLISH");
@@ -95,14 +100,59 @@ export async function reconcileScheduleFromEnv(): Promise<void> {
     schedule = updated;
   }
 
-  // Keep the legacy settings mirror aligned so dashboard status cannot disagree
-  // with the scheduler after a Railway restart.
-  if (desiredAutoPublish !== undefined) {
-    await db.update(settingsTable).set({ autoPublish: desiredAutoPublish });
+  // ── AI budget self-heal ──────────────────────────────────────────────────
+  // Explicit Railway values always win. Otherwise only upgrade legacy-small
+  // persisted defaults; do not overwrite a deliberately larger custom budget.
+  const profile = getChannelProfile();
+  const recommendedCalls = profile === "crypto" ? 80 : 60;
+  const recommendedGeneratedPosts = profile === "crypto" ? 12 : 10;
+  const explicitMaxAiCalls = envInt("MAX_AI_CALLS_PER_DAY", "AI_MAX_CALLS_PER_DAY");
+  const explicitMaxGeneratedPosts = envInt("MAX_GENERATED_POSTS_PER_DAY", "AI_MAX_POSTS_PER_DAY");
+
+  const settingsRows = await db.select().from(settingsTable).limit(1);
+  let settings = settingsRows[0];
+  const settingsUpdates: Partial<typeof settingsTable.$inferInsert> = {};
+
+  if (!settings) {
+    settingsUpdates.maxAiCallsPerDay = explicitMaxAiCalls ?? recommendedCalls;
+    settingsUpdates.maxPostsPerDay = explicitMaxGeneratedPosts ?? recommendedGeneratedPosts;
+    if (desiredAutoPublish !== undefined) {
+      settingsUpdates.autoPublish = desiredAutoPublish;
+      settingsUpdates.postingRequiresApproval = !desiredAutoPublish;
+    }
+    const [created] = await db.insert(settingsTable).values(settingsUpdates).returning();
+    settings = created;
+  } else {
+    if (explicitMaxAiCalls !== undefined) {
+      settingsUpdates.maxAiCallsPerDay = explicitMaxAiCalls;
+    } else if (settings.maxAiCallsPerDay <= 12) {
+      settingsUpdates.maxAiCallsPerDay = recommendedCalls;
+    }
+
+    if (explicitMaxGeneratedPosts !== undefined) {
+      settingsUpdates.maxPostsPerDay = explicitMaxGeneratedPosts;
+    } else if (settings.maxPostsPerDay <= 6) {
+      settingsUpdates.maxPostsPerDay = recommendedGeneratedPosts;
+    }
+
+    if (desiredAutoPublish !== undefined) {
+      settingsUpdates.autoPublish = desiredAutoPublish;
+      settingsUpdates.postingRequiresApproval = !desiredAutoPublish;
+    }
+
+    if (Object.keys(settingsUpdates).length > 0) {
+      const [updatedSettings] = await db
+        .update(settingsTable)
+        .set(settingsUpdates)
+        .where(eq(settingsTable.id, settings.id))
+        .returning();
+      settings = updatedSettings;
+    }
   }
 
   logger.info(
     {
+      profile,
       enabled: schedule?.enabled ?? false,
       autoPublish: schedule?.autoPublish ?? false,
       postingTimezone: schedule?.postingTimezone,
@@ -111,7 +161,10 @@ export async function reconcileScheduleFromEnv(): Promise<void> {
       minPostsPerDay: schedule?.minPostsPerDay,
       targetPostsPerDay: schedule?.targetPostsPerDay,
       maxPostsPerDay: schedule?.maxPostsPerDay,
+      maxAiCallsPerDay: settings?.maxAiCallsPerDay,
+      maxGeneratedPostsPerDay: settings?.maxPostsPerDay,
+      postingRequiresApproval: settings?.postingRequiresApproval,
     },
-    "Reconciled posting schedule from Railway environment",
+    "Reconciled posting schedule and AI budget from Railway environment",
   );
 }
