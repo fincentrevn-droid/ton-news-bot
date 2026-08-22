@@ -20,6 +20,7 @@ jobs:
       PORT: '3000'
       BASE_PATH: '/'
       ENABLE_MEDIA_DOWNLOAD: 'true'
+      POSTING_TIMEZONE: 'Europe/Kyiv'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,10 +30,15 @@ jobs:
         run: sh scripts/railway-startup-smoke.sh
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - name: Apply shared OpenAI compatibility patch
+      - name: Apply shared OpenAI compatibility and local-day accounting
         run: |
           node scripts/patch-openai-default-temperature.mjs
+          node scripts/patch-local-day-accounting.mjs
           ! grep -q '^[[:space:]]*temperature:' artifacts/api-server/src/lib/openai.ts
+          grep -q 'LOCAL_AI_USAGE_DAY' artifacts/api-server/src/lib/openai.ts
+          grep -q 'requestedTimezone = process.env.POSTING_TIMEZONE' artifacts/api-server/src/lib/openai.ts
+          grep -q 'CRYPTO_GENERATED_BUDGET_SELF_HEAL' artifacts/api-server/src/lib/runtime-schedule.ts
+          grep -q 'legacyGeneratedPostCeiling = profile === "crypto" ? 8 : 6' artifacts/api-server/src/lib/runtime-schedule.ts
       - name: Apply PANKOFF runtime patches
         if: matrix.profile == 'crypto'
         run: |
@@ -62,10 +68,12 @@ jobs:
       - name: Profile isolation and reliability smoke test
         run: |
           grep -q 'patch-openai-default-temperature.mjs' scripts/start-railway.sh
+          grep -q 'patch-local-day-accounting.mjs' scripts/start-railway.sh
           grep -q 'patch-autopost-reliability.mjs' scripts/start-railway.sh
           grep -q 'patch-ai-output-safety.mjs' scripts/start-railway.sh
           grep -q 'patch-quality-check-resilience.mjs' scripts/start-railway.sh
           ! grep -q '^[[:space:]]*temperature:' artifacts/api-server/src/lib/openai.ts
+          grep -q 'LOCAL_AI_USAGE_DAY' artifacts/api-server/src/lib/openai.ts
           grep -q 'AI_STRUCTURED_OUTPUT_REPAIR' artifacts/api-server/src/lib/openai.ts
           grep -q 'AI_FORMAT_ERROR' artifacts/api-server/src/lib/openai.ts
           grep -q 'QC_STRUCTURED_OUTPUT_RESILIENCE' artifacts/api-server/src/lib/openai.ts
@@ -80,6 +88,7 @@ jobs:
           grep -q 'generation failed; short retry scheduled' artifacts/api-server/src/lib/scheduler.ts
           grep -q 'recommendedCalls = profile === "crypto" ? 80 : 60' artifacts/api-server/src/lib/runtime-schedule.ts
           grep -q 'recommendedGeneratedPosts = profile === "crypto" ? 12 : 10' artifacts/api-server/src/lib/runtime-schedule.ts
+          grep -q 'legacyGeneratedPostCeiling = profile === "crypto" ? 8 : 6' artifacts/api-server/src/lib/runtime-schedule.ts
           grep -q 'default(60)' lib/db/src/schema/settings.ts
           grep -q 'default(10)' lib/db/src/schema/settings.ts
           if [ "$CONTENT_PROFILE" = "crypto" ]; then
