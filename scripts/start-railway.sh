@@ -76,6 +76,7 @@ else
   node scripts/patch-fincentre-publisher-v2.mjs
 
   pnpm --filter @workspace/api-server run build
+  pnpm --filter @workspace/dashboard run build
 fi
 
 if [ -n "${DATABASE_URL:-}" ]; then
