@@ -50,7 +50,7 @@ await patch(
     // generated post fails auto-publish QC and is routed to manual review.
     if (!s.includes("AUTO_REVIEW_SHORT_RETRY")) {
       const oldThen = `  generateAndQueuePost(notifyOwner)\n    .then((result) => {\n      if (result) {\n        logger.info({ postId: result.postId, queued: result.queued, qc: result.qualityScore }, "Scheduler: auto-generation completed");\n      } else {\n        const cooldownMinutes = Math.max(minMinutesBetweenPosts, 75);\n        lastAutoGenerateAttemptMs = Date.now() - Math.max(0, cooldownMinutes - AUTO_GENERATE_RETRY_MINUTES) * 60 * 1000;\n        logger.info({ retryInMin: AUTO_GENERATE_RETRY_MINUTES }, "Scheduler: auto-generation returned no post; short retry scheduled");\n      }\n    })`;
-      const newThen = `  generateAndQueuePost(notifyOwner)\n    .then((result) => {\n      if (result?.queued) {\n        logger.info({ postId: result.postId, queued: true, qc: result.qualityScore }, "Scheduler: auto-generation queued an eligible post");\n      } else {\n        // AUTO_REVIEW_SHORT_RETRY: null and QC-review results both mean there is\n        // still nothing eligible for autopublish. Rotate sources again soon.\n        const cooldownMinutes = Math.max(minMinutesBetweenPosts, 75);\n        lastAutoGenerateAttemptMs = Date.now() - Math.max(0, cooldownMinutes - AUTO_GENERATE_RETRY_MINUTES) * 60 * 1000;\n        logger.info(\n          { postId: result?.postId, queued: result?.queued ?? false, retryInMin: AUTO_GENERATE_RETRY_MINUTES },\n          "Scheduler: no eligible queued post; short retry scheduled",\n        );\n      }\n    })`;
+      const newThen = `  generateAndQueuePost(notifyOwner)\n    .then((result) => {\n      if (result?.queued) {\n        logger.info({ postId: result.postId, queued: true, qc: result.qualityScore }, "Scheduler: auto-generation queued an eligible post");\n      } else {\n        // AUTO_REVIEW_SHORT_RETRY: null and QC-review results both mean there is\n        // still nothing eligible for autopublish. Rotate sources again soon.\n        lastAutoGenerateAttemptMs = Date.now() - AUTO_GENERATE_RETRY_MINUTES * 60 * 1000;\n        logger.info(\n          { postId: result?.postId, queued: result?.queued ?? false, retryInMin: AUTO_GENERATE_RETRY_MINUTES },\n          "Scheduler: no eligible queued post; short retry scheduled",\n        );\n      }\n    })`;
       if (!s.includes(oldThen)) throw new Error("scheduler generation completion block not found after reliability patch");
       s = s.replace(oldThen, newThen);
     }
@@ -65,9 +65,44 @@ await patch(
       'const AUTO_GENERATE_RETRY_MINUTES = Math.max(5, Number.parseInt(process.env.AUTO_GENERATE_RETRY_MINUTES ?? "10", 10) || 10);',
     );
 
+    // Generation is source preparation, not publication. The old scheduler put
+    // the publish-spacing return before queue inspection, so after one successful
+    // post it would not even search/generate the next candidate for 75+ minutes.
+    // Move spacing to immediately before Telegram send. If the queue has no
+    // eligible draft, generation is allowed to run on its own short retry cadence.
+    if (!s.includes("AUTOPUBLISH_PREPARE_AHEAD")) {
+      const spacingStart = s.indexOf("    // Minimum spacing check");
+      const queueStart = s.indexOf("    // Find the oldest queued draft ready for auto-publish", spacingStart);
+      if (spacingStart < 0 || queueStart < 0) throw new Error("publish spacing block not found");
+
+      const spacingBlock = s.slice(spacingStart, queueStart);
+      s = s.slice(0, spacingStart) + s.slice(queueStart);
+
+      const publishMarker = "    // ── Publish the queued post";
+      const publishAt = s.indexOf(publishMarker);
+      if (publishAt < 0) throw new Error("publish marker not found");
+
+      const relocatedSpacing = spacingBlock.replace(
+        "    // Minimum spacing check (only applies to publishing, not generation trigger)",
+        "    // AUTOPUBLISH_PREPARE_AHEAD: spacing applies only to Telegram publish, never source preparation",
+      );
+      s = s.slice(0, publishAt) + relocatedSpacing + s.slice(publishAt);
+    }
+
+    // The base cooldown itself must also be independent from publish spacing.
+    // Otherwise the first rejected candidate after a restart can still block
+    // source rotation for 75+ minutes before the short-retry adjustment runs.
+    const legacyCooldown = "  const cooldownMs = Math.max(minMinutesBetweenPosts, 75) * 60 * 1000;";
+    if (s.includes(legacyCooldown)) {
+      s = s.replace(
+        legacyCooldown,
+        "  const cooldownMs = AUTO_GENERATE_RETRY_MINUTES * 60 * 1000; // AUTOPUBLISH_GENERATION_COOLDOWN",
+      );
+    }
+
     return s;
   },
-  "Made natural scheduler rotate rejected candidates quickly",
+  "Made natural scheduler prepare candidates independently from publish spacing",
 );
 
 // FINCENTRE deduplicates only published material by design. When QC rejects a
