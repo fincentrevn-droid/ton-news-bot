@@ -67,6 +67,10 @@ if [ "$PROFILE" = "crypto" ]; then
   node scripts/patch-pankoff-today-v3.mjs
   node scripts/patch-pankoff-autotest-transport.mjs
 
+  # Natural scheduler throughput: rotate QC rejects quickly and keep the public
+  # daily cap separate from internal generated-draft accounting.
+  node scripts/patch-autopost-throughput-v1.mjs
+
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
 else
@@ -84,6 +88,10 @@ else
   # Final business-only publisher pass: restore @fincentre_business and expose
   # a one-shot production autopublish test without changing normal intervals.
   node scripts/patch-fincentre-publisher-v2.mjs
+
+  # Natural scheduler throughput: a QC-rejected FINCENTRE source is temporarily
+  # rotated out and another source is tried soon instead of waiting 75+ minutes.
+  node scripts/patch-autopost-throughput-v1.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
