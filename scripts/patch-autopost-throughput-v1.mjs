@@ -55,10 +55,13 @@ await patch(
       s = s.replace(oldThen, newThen);
     }
 
-    // Ten minutes is frequent enough to rotate through rejected candidates while
-    // the 60/80-call daily budget still bounds cost.
+    // PANKOFF legacy hardening used 30 min and shared reliability used 20 min.
+    // Normalize either form to 10 min for source/QC rotation. This does NOT
+    // shorten the real minimum spacing between successfully published posts.
+    const retryConst = /const AUTO_GENERATE_RETRY_MINUTES = Math\.max\(5, Number\.parseInt\(process\.env\.AUTO_GENERATE_RETRY_MINUTES \?\? "\d+", 10\) \|\| \d+\);/;
+    if (!retryConst.test(s)) throw new Error("AUTO_GENERATE_RETRY_MINUTES constant not found");
     s = s.replace(
-      'const AUTO_GENERATE_RETRY_MINUTES = Math.max(5, Number.parseInt(process.env.AUTO_GENERATE_RETRY_MINUTES ?? "20", 10) || 20);',
+      retryConst,
       'const AUTO_GENERATE_RETRY_MINUTES = Math.max(5, Number.parseInt(process.env.AUTO_GENERATE_RETRY_MINUTES ?? "10", 10) || 10);',
     );
 
