@@ -1,0 +1,1 @@
+Independent Replit audit confirmed that manual generation can work while the natural scheduler under-publishes when the first source candidate is routed to review by QC. This change keeps QC fail-closed and retries different fresh sources within the same scheduler cycle. Production remains Railway via GitHub main.
