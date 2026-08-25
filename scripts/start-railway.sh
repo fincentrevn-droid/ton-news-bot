@@ -8,6 +8,9 @@ PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-}}"
 export PORT="${PORT:-3000}"
 export BASE_PATH="${BASE_PATH:-/}"
 export NODE_ENV="${NODE_ENV:-production}"
+# Media is part of the production product for both channels. Force it on so a
+# legacy Railway variable cannot silently disable the entire image pipeline.
+export ENABLE_MEDIA_DOWNLOAD="true"
 
 # Keep OpenAI request parameters compatible for both Railway services.
 # Luna rejects explicit temperature overrides; prompts/QC define editorial style.
@@ -67,9 +70,13 @@ if [ "$PROFILE" = "crypto" ]; then
   node scripts/patch-pankoff-today-v3.mjs
   node scripts/patch-pankoff-autotest-transport.mjs
 
-  # Natural scheduler throughput: rotate QC rejects quickly and keep the public
-  # daily cap separate from internal generated-draft accounting.
+  # Natural scheduler throughput: source preparation is independent of real
+  # Telegram publish spacing.
   node scripts/patch-autopost-throughput-v1.mjs
+
+  # Final shared media pass: scanner runtime compatibility, media staging and
+  # publisher fallbacks. Must run after profile-specific publisher patches.
+  node scripts/patch-shared-media-pipeline-v1.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
@@ -92,6 +99,10 @@ else
   # Natural scheduler throughput: a QC-rejected FINCENTRE source is temporarily
   # rotated out and another source is tried soon instead of waiting 75+ minutes.
   node scripts/patch-autopost-throughput-v1.mjs
+
+  # Final shared media pass connects the deferred FINCENTRE photo loader, runs
+  # image safety and makes manual/automatic publishing use staged media.
+  node scripts/patch-shared-media-pipeline-v1.mjs
 
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build

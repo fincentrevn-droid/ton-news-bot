@@ -1,0 +1,83 @@
+name: Dual Bot Media Pipeline Check
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  media:
+    name: ${{ matrix.profile }} media pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [business, crypto]
+    env:
+      CONTENT_PROFILE: ${{ matrix.profile }}
+      OPENAI_MODEL: gpt-5.6-luna
+      PORT: '3000'
+      BASE_PATH: '/'
+      ENABLE_MEDIA_DOWNLOAD: 'true'
+      POSTING_TIMEZONE: 'Europe/Kyiv'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Apply production runtime patches
+        run: |
+          node scripts/patch-openai-default-temperature.mjs
+          node scripts/patch-local-day-accounting.mjs
+          if [ "$CONTENT_PROFILE" = "crypto" ]; then
+            node scripts/patch-pankoff-footer.mjs
+            node scripts/patch-pankoff-hardening-2.mjs
+            node scripts/patch-pankoff-style-v2.mjs
+            node scripts/patch-pankoff-publish-recovery.mjs
+            node scripts/patch-pankoff-final-hardening.mjs
+            node scripts/patch-pankoff-disable-footer.mjs
+          else
+            node scripts/patch-fincentre-stall-v2.mjs
+            node scripts/patch-fincentre-schedule-defaults.mjs
+            node scripts/patch-fincentre-editorial-v1.mjs
+          fi
+          node scripts/patch-autopost-reliability.mjs
+          node scripts/patch-ai-output-safety.mjs
+          node scripts/patch-quality-check-resilience.mjs
+          if [ "$CONTENT_PROFILE" = "crypto" ]; then
+            node scripts/patch-pankoff-today-v3.mjs
+            node scripts/patch-pankoff-autotest-transport.mjs
+          else
+            node scripts/patch-fincentre-publisher-v2.mjs
+          fi
+          node scripts/patch-autopost-throughput-v1.mjs
+          node scripts/patch-shared-media-pipeline-v1.mjs
+      - name: Verify media markers
+        run: |
+          grep -q 'export ENABLE_MEDIA_DOWNLOAD="true"' scripts/start-railway.sh
+          grep -q 'patch-shared-media-pipeline-v1.mjs' scripts/start-railway.sh
+          grep -q 'imagemagick' nixpacks.toml
+          grep -q 'MEDIA_PREUPLOAD_CHAT_FALLBACK' artifacts/api-server/src/lib/telegram.ts
+          grep -q 'getReviewChatId()' artifacts/api-server/src/lib/telegram.ts
+          if [ "$CONTENT_PROFILE" = "crypto" ]; then
+            grep -q 'CRYPTO_IMAGEMAGICK_OCR_FALLBACK' artifacts/api-server/src/lib/crypto-media-safety.ts
+            grep -q 'PANKOFF_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
+          else
+            grep -q 'FINCENTRE_SELECTED_MEDIA_LOAD' artifacts/api-server/src/lib/auto-generate.ts
+            grep -q 'assessBusinessImageSafety' artifacts/api-server/src/lib/auto-generate.ts
+            grep -q 'selectedMediaBuffer' artifacts/api-server/src/lib/auto-generate.ts
+            grep -q 'FINCENTRE_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
+          fi
+      - name: Typecheck libraries
+        run: pnpm run typecheck:libs
+      - name: Typecheck API
+        run: pnpm --filter @workspace/api-server run typecheck
+      - name: Typecheck dashboard
+        run: pnpm --filter @workspace/dashboard run typecheck
+      - name: Build API
+        run: pnpm --filter @workspace/api-server run build
+      - name: Build dashboard
+        run: pnpm --filter @workspace/dashboard run build
