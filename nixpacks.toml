@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["...", "tesseract", "zbar"]
+nixPkgs = ["...", "imagemagick", "tesseract", "zbar"]
 
 [phases.install]
 cmds = ["pnpm install --no-frozen-lockfile"]
