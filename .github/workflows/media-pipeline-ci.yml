@@ -71,8 +71,12 @@ jobs:
             grep -q 'selectedMediaBuffer' artifacts/api-server/src/lib/auto-generate.ts
             grep -q 'FINCENTRE_DASHBOARD_MEDIA_PUBLISH' artifacts/api-server/src/routes/posts.ts
           fi
+      - name: Typecheck libraries
+        run: pnpm run typecheck:libs
       - name: Typecheck API
         run: pnpm --filter @workspace/api-server run typecheck
+      - name: Typecheck dashboard
+        run: pnpm --filter @workspace/dashboard run typecheck
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
       - name: Build dashboard
