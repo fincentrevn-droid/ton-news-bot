@@ -1,7 +1,9 @@
 #!/bin/sh
 set -e
 
-PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-}}"
+PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-business}}"
+RUNTIME_BASELINE=".runtime-baseline"
+RUNTIME_READY=".runtime-build-ready-${PROFILE}"
 
 # Railway normally injects PORT, but runtime rebuilds must not depend on optional env vars.
 # Vite requires both PORT and BASE_PATH, so provide safe production defaults here.
@@ -12,12 +14,41 @@ export NODE_ENV="${NODE_ENV:-production}"
 # legacy Railway variable cannot silently disable the entire image pipeline.
 export ENABLE_MEDIA_DOWNLOAD="true"
 
-# Keep OpenAI request parameters compatible for both Railway services.
-# Luna rejects explicit temperature overrides; prompts/QC define editorial style.
-node scripts/patch-openai-default-temperature.mjs
-# Daily AI accounting must use the same Europe/Kyiv day as posting/news freshness.
-# Also repairs the legacy PANKOFF internal generated-post budget of 8 -> 12.
-node scripts/patch-local-day-accounting.mjs
+echo "[startup] profile=${PROFILE} node_env=${NODE_ENV}"
+
+# The project intentionally applies compatibility/editorial patches at runtime.
+# Several historical patch scripts expect pristine source text and are not safe
+# to run twice against an already-mutated Railway filesystem. Keep a pristine
+# baseline on the first process start. If a previous startup failed halfway,
+# restore that baseline before retrying. After a successful runtime build, later
+# process restarts reuse the already-built dist instead of re-patching source.
+prepare_runtime_sources() {
+  if [ -f "$RUNTIME_READY" ]; then
+    echo "[startup] runtime patches already built; reusing existing dist"
+    return 1
+  fi
+
+  if [ ! -d "$RUNTIME_BASELINE" ]; then
+    echo "[startup] saving pristine runtime source baseline"
+    mkdir -p "$RUNTIME_BASELINE"
+    cp -R artifacts/api-server/src "$RUNTIME_BASELINE/api-server-src"
+    cp -R artifacts/dashboard/src "$RUNTIME_BASELINE/dashboard-src"
+    cp -R lib/db/src "$RUNTIME_BASELINE/db-src"
+  else
+    echo "[startup] restoring pristine source after incomplete previous startup"
+    rm -rf artifacts/api-server/src artifacts/dashboard/src lib/db/src
+    cp -R "$RUNTIME_BASELINE/api-server-src" artifacts/api-server/src
+    cp -R "$RUNTIME_BASELINE/dashboard-src" artifacts/dashboard/src
+    cp -R "$RUNTIME_BASELINE/db-src" lib/db/src
+  fi
+
+  return 0
+}
+
+run_patch() {
+  echo "[startup] applying $1"
+  node "$1"
+}
 
 # PANKOFF CRYPTO may use a Telethon StringSession copied without trailing base64 padding.
 # GramJS detects Telethon IPv4 sessions by the encoded body length, so normalize only
@@ -47,69 +78,65 @@ if [ "$PROFILE" = "crypto" ] && [ -n "${TELEGRAM_STRING_SESSION:-}" ]; then
 
   if [ "$normalized_session" != "$TELEGRAM_STRING_SESSION" ]; then
     export TELEGRAM_STRING_SESSION="$normalized_session"
-    echo "Normalized PANKOFF Telegram StringSession padding"
+    echo "[startup] normalized PANKOFF Telegram StringSession padding"
   fi
 fi
 
-if [ "$PROFILE" = "crypto" ]; then
-  # Apply PANKOFF-only runtime hardening and editorial style.
-  node scripts/patch-pankoff-footer.mjs
-  node scripts/patch-pankoff-hardening-2.mjs
-  node scripts/patch-pankoff-style-v2.mjs
-  node scripts/patch-pankoff-publish-recovery.mjs
-  node scripts/patch-pankoff-final-hardening.mjs
-  node scripts/patch-pankoff-disable-footer.mjs
+if prepare_runtime_sources; then
+  # Keep OpenAI request parameters compatible for both Railway services.
+  run_patch scripts/patch-openai-default-temperature.mjs
+  # Daily AI accounting must use the same Europe/Kyiv day as posting/news freshness.
+  run_patch scripts/patch-local-day-accounting.mjs
 
-  # Shared reliability, output safety and QC structured-output resilience.
-  node scripts/patch-autopost-reliability.mjs
-  node scripts/patch-ai-output-safety.mjs
-  node scripts/patch-quality-check-resilience.mjs
+  if [ "$PROFILE" = "crypto" ]; then
+    # Apply PANKOFF-only runtime hardening and editorial style.
+    run_patch scripts/patch-pankoff-footer.mjs
+    run_patch scripts/patch-pankoff-hardening-2.mjs
+    run_patch scripts/patch-pankoff-style-v2.mjs
+    run_patch scripts/patch-pankoff-publish-recovery.mjs
+    run_patch scripts/patch-pankoff-final-hardening.mjs
+    run_patch scripts/patch-pankoff-disable-footer.mjs
 
-  # Final PANKOFF passes: today-only Kyiv sources/event-first style, instant
-  # autopublish test and a safe Telegram transport fallback when no news exists.
-  node scripts/patch-pankoff-today-v3.mjs
-  node scripts/patch-pankoff-autotest-transport.mjs
+    # Shared reliability, output safety and QC structured-output resilience.
+    run_patch scripts/patch-autopost-reliability.mjs
+    run_patch scripts/patch-ai-output-safety.mjs
+    run_patch scripts/patch-quality-check-resilience.mjs
 
-  # Natural scheduler throughput: source preparation is independent of real
-  # Telegram publish spacing.
-  node scripts/patch-autopost-throughput-v1.mjs
+    # Final PANKOFF passes.
+    run_patch scripts/patch-pankoff-today-v3.mjs
+    run_patch scripts/patch-pankoff-autotest-transport.mjs
+    run_patch scripts/patch-autopost-throughput-v1.mjs
+    run_patch scripts/patch-shared-media-pipeline-v1.mjs
+  else
+    # FINCENTRE BUSINESS anti-stall, source recovery, schedule self-heal and style.
+    run_patch scripts/patch-fincentre-stall-v2.mjs
+    run_patch scripts/patch-fincentre-source-recovery.mjs
+    run_patch scripts/patch-fincentre-schedule-defaults.mjs
+    run_patch scripts/patch-fincentre-editorial-v1.mjs
 
-  # Final shared media pass: scanner runtime compatibility, media staging and
-  # publisher fallbacks. Must run after profile-specific publisher patches.
-  node scripts/patch-shared-media-pipeline-v1.mjs
+    # Shared reliability, output safety and QC structured-output resilience.
+    run_patch scripts/patch-autopost-reliability.mjs
+    run_patch scripts/patch-ai-output-safety.mjs
+    run_patch scripts/patch-quality-check-resilience.mjs
 
+    # Final business publisher/retry/media passes.
+    run_patch scripts/patch-fincentre-publisher-v2.mjs
+    run_patch scripts/patch-autopost-throughput-v1.mjs
+    run_patch scripts/patch-shared-media-pipeline-v1.mjs
+  fi
+
+  echo "[startup] rebuilding patched API and dashboard"
   pnpm --filter @workspace/api-server run build
   pnpm --filter @workspace/dashboard run build
-else
-  # FINCENTRE BUSINESS has its own anti-stall hardening, schedule self-heal and
-  # Ukrainian business editorial prompt. These patches are business-only.
-  node scripts/patch-fincentre-stall-v2.mjs
-  node scripts/patch-fincentre-schedule-defaults.mjs
-  node scripts/patch-fincentre-editorial-v1.mjs
-
-  # Shared reliability, output safety and QC structured-output resilience.
-  node scripts/patch-autopost-reliability.mjs
-  node scripts/patch-ai-output-safety.mjs
-  node scripts/patch-quality-check-resilience.mjs
-
-  # Final business-only publisher pass: restore @fincentre_business and expose
-  # a one-shot production autopublish test without changing normal intervals.
-  node scripts/patch-fincentre-publisher-v2.mjs
-
-  # Natural scheduler throughput: a QC-rejected FINCENTRE source is temporarily
-  # rotated out and another source is tried soon instead of waiting 75+ minutes.
-  node scripts/patch-autopost-throughput-v1.mjs
-
-  # Final shared media pass connects the deferred FINCENTRE photo loader, runs
-  # image safety and makes manual/automatic publishing use staged media.
-  node scripts/patch-shared-media-pipeline-v1.mjs
-
-  pnpm --filter @workspace/api-server run build
-  pnpm --filter @workspace/dashboard run build
+  touch "$RUNTIME_READY"
+  echo "[startup] runtime build completed successfully"
 fi
 
 if [ -n "${DATABASE_URL:-}" ]; then
+  echo "[startup] applying database schema"
   pnpm --filter @workspace/db run push-force
+else
+  echo "[startup] WARNING: DATABASE_URL is not set"
 fi
 
 exec pnpm run start
