@@ -112,6 +112,7 @@ if prepare_runtime_sources; then
     run_patch scripts/patch-fincentre-stall-v2.mjs
     run_patch scripts/patch-fincentre-source-recovery.mjs
     run_patch scripts/patch-fincentre-schedule-defaults.mjs
+    run_patch scripts/patch-fincentre-budget-recovery.mjs
     run_patch scripts/patch-fincentre-editorial-v1.mjs
 
     # Shared reliability, output safety and QC structured-output resilience.
