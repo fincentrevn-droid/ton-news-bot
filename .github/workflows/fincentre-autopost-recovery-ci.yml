@@ -1,0 +1,61 @@
+name: FINCENTRE Autopost Recovery Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  fincentre-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONTENT_PROFILE: business
+      CHANNEL_PROFILE: business
+      OPENAI_MODEL: gpt-5.6-luna
+      PORT: '3000'
+      BASE_PATH: '/'
+      ENABLE_MEDIA_DOWNLOAD: 'true'
+      POSTING_TIMEZONE: 'Europe/Kyiv'
+      MAX_AI_CALLS_PER_DAY: '12'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Validate startup shell and recovery patch syntax
+        run: |
+          sh -n scripts/start-railway.sh
+          node --check scripts/patch-fincentre-source-recovery.mjs
+          node --check scripts/patch-fincentre-budget-recovery.mjs
+      - name: Apply production FINCENTRE patch chain
+        run: |
+          node scripts/patch-openai-default-temperature.mjs
+          node scripts/patch-local-day-accounting.mjs
+          node scripts/patch-fincentre-stall-v2.mjs
+          node scripts/patch-fincentre-source-recovery.mjs
+          node scripts/patch-fincentre-schedule-defaults.mjs
+          node scripts/patch-fincentre-budget-recovery.mjs
+          node scripts/patch-fincentre-editorial-v1.mjs
+          node scripts/patch-autopost-reliability.mjs
+          node scripts/patch-ai-output-safety.mjs
+          node scripts/patch-quality-check-resilience.mjs
+          node scripts/patch-fincentre-publisher-v2.mjs
+          node scripts/patch-autopost-throughput-v1.mjs
+          node scripts/patch-shared-media-pipeline-v1.mjs
+      - name: Verify recovery markers
+        run: |
+          grep -q 'FINCENTRE_SOURCE_RECOVERY' artifacts/api-server/src/index.ts
+          grep -q 'European Central Bank' artifacts/api-server/src/index.ts
+          grep -q 'Federal Reserve Monetary Policy' artifacts/api-server/src/index.ts
+          grep -q 'FINCENTRE_LEGACY_AI_BUDGET_RECOVERY' artifacts/api-server/src/lib/runtime-schedule.ts
+          grep -q 'effectiveMaxAiCalls' artifacts/api-server/src/lib/runtime-schedule.ts
+          grep -q 'AUTOPUBLISH_PREPARE_AHEAD' artifacts/api-server/src/lib/scheduler.ts
+          grep -q 'FINCENTRE_PUBLIC_SIGNATURE' artifacts/api-server/src/lib/telegram.ts
+      - name: Typecheck workspace libraries
+        run: pnpm run typecheck:libs
+      - name: Typecheck API
+        run: pnpm --filter @workspace/api-server run typecheck
+      - name: Build API
+        run: pnpm --filter @workspace/api-server run build
