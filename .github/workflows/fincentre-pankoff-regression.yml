@@ -90,7 +90,7 @@ jobs:
           grep -q 'RUSSIA_TOPIC_PATTERNS' artifacts/api-server/src/lib/crypto-policy.ts
           grep -q 'тема России запрещена редакционной политикой PANKOFF' artifacts/api-server/src/lib/crypto-policy.ts
           grep -q 'PANKOFF_EDITORIAL_BLOCK_RUSSIA' artifacts/api-server/src/lib/openai.ts
-          grep -q 'пост касается России/РФ' artifacts/api-server/src/lib/openai.ts
+          grep -q 'Пост касается России/РФ' artifacts/api-server/src/lib/openai.ts
           grep -q 'patch-pankoff-block-russia-v1.mjs' scripts/start-railway.sh
       - name: Typecheck libraries
         run: pnpm run typecheck:libs
