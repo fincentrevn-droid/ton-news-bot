@@ -1,0 +1,100 @@
+name: FINCENTRE + PANKOFF Regression Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  fincentre-autopost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONTENT_PROFILE: business
+      CHANNEL_PROFILE: business
+      OPENAI_MODEL: gpt-5.6-luna
+      PORT: '3000'
+      BASE_PATH: '/'
+      ENABLE_MEDIA_DOWNLOAD: 'true'
+      POSTING_TIMEZONE: 'Europe/Kyiv'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Validate new patch syntax
+        run: |
+          sh -n scripts/start-railway.sh
+          node --check scripts/patch-fincentre-autopost-v4.mjs
+      - name: Apply FINCENTRE production patch chain
+        run: |
+          node scripts/patch-openai-default-temperature.mjs
+          node scripts/patch-local-day-accounting.mjs
+          node scripts/patch-fincentre-stall-v2.mjs
+          node scripts/patch-fincentre-source-recovery.mjs
+          node scripts/patch-fincentre-schedule-defaults.mjs
+          node scripts/patch-fincentre-budget-recovery.mjs
+          node scripts/patch-fincentre-editorial-v1.mjs
+          node scripts/patch-autopost-reliability.mjs
+          node scripts/patch-ai-output-safety.mjs
+          node scripts/patch-quality-check-resilience.mjs
+          node scripts/patch-fincentre-publisher-v2.mjs
+          node scripts/patch-autopost-throughput-v1.mjs
+          node scripts/patch-shared-media-pipeline-v1.mjs
+          node scripts/patch-fincentre-autopost-v4.mjs
+      - name: Verify FINCENTRE recovery policy
+        run: |
+          grep -q 'https://www.kmu.gov.ua/api/rss' artifacts/api-server/src/index.ts
+          grep -q 'FINCENTRE_ALWAYS_USE_RSS' artifacts/api-server/src/lib/sources.ts
+          grep -q 'FINCENTRE_SCHEDULER_STATE_LOG' artifacts/api-server/src/lib/scheduler.ts
+          grep -q 'export AUTO_PUBLISH="true"' scripts/start-railway.sh
+          grep -q 'export SCHEDULE_ENABLED="true"' scripts/start-railway.sh
+          grep -q 'export ENABLE_SECONDARY_SOURCES="true"' scripts/start-railway.sh
+      - name: Typecheck libraries
+        run: pnpm run typecheck:libs
+      - name: Typecheck API
+        run: pnpm --filter @workspace/api-server run typecheck
+      - name: Build API
+        run: pnpm --filter @workspace/api-server run build
+
+  pankoff-russia-filter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONTENT_PROFILE: crypto
+      CHANNEL_PROFILE: crypto
+      OPENAI_MODEL: gpt-5.6-luna
+      PORT: '3000'
+      BASE_PATH: '/'
+      ENABLE_MEDIA_DOWNLOAD: 'true'
+      POSTING_TIMEZONE: 'Europe/Kyiv'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Validate new patch syntax
+        run: |
+          sh -n scripts/start-railway.sh
+          node --check scripts/patch-pankoff-block-russia-v1.mjs
+      - name: Apply PANKOFF policy prerequisites and Russia filter
+        run: |
+          node scripts/patch-pankoff-today-v3.mjs
+          node scripts/patch-pankoff-block-russia-v1.mjs
+      - name: Verify deterministic Russia block
+        run: |
+          grep -q 'PANKOFF_BLOCK_RUSSIA_TOPICS' artifacts/api-server/src/lib/crypto-policy.ts
+          grep -q 'RUSSIA_TOPIC_PATTERNS' artifacts/api-server/src/lib/crypto-policy.ts
+          grep -q 'тема России запрещена редакционной политикой PANKOFF' artifacts/api-server/src/lib/crypto-policy.ts
+          grep -q 'PANKOFF_EDITORIAL_BLOCK_RUSSIA' artifacts/api-server/src/lib/openai.ts
+          grep -q 'пост касается России/РФ' artifacts/api-server/src/lib/openai.ts
+          grep -q 'patch-pankoff-block-russia-v1.mjs' scripts/start-railway.sh
+      - name: Typecheck libraries
+        run: pnpm run typecheck:libs
+      - name: Typecheck API
+        run: pnpm --filter @workspace/api-server run typecheck
+      - name: Build API
+        run: pnpm --filter @workspace/api-server run build
