@@ -1,7 +1,21 @@
 #!/bin/sh
 set -e
 
-PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-business}}"
+RAW_PROFILE="${CHANNEL_PROFILE:-${CONTENT_PROFILE:-business}}"
+case "$(printf '%s' "$RAW_PROFILE" | tr '[:upper:]' '[:lower:]')" in
+  crypto|pankoff_crypto)
+    PROFILE="crypto"
+    ;;
+  *)
+    PROFILE="business"
+    ;;
+esac
+
+# Keep both historical profile variables synchronized. Some older modules read
+# CONTENT_PROFILE while newer profile-aware code reads CHANNEL_PROFILE.
+export CHANNEL_PROFILE="$PROFILE"
+export CONTENT_PROFILE="$PROFILE"
+
 RUNTIME_BASELINE=".runtime-baseline"
 RUNTIME_READY=".runtime-build-ready-${PROFILE}"
 
@@ -13,6 +27,18 @@ export NODE_ENV="${NODE_ENV:-production}"
 # Media is part of the production product for both channels. Force it on so a
 # legacy Railway variable cannot silently disable the entire image pipeline.
 export ENABLE_MEDIA_DOWNLOAD="true"
+
+# FINCENTRE is an unattended autopost service. A stale Railway variable from an
+# old manual-review deployment must not leave the public channel silent after a
+# restart. Dashboard changes can still pause the current process; every fresh
+# production deployment intentionally comes back in unattended mode.
+if [ "$PROFILE" = "business" ]; then
+  export AUTO_PUBLISH="true"
+  export SCHEDULE_ENABLED="true"
+  export POSTING_REQUIRES_APPROVAL="false"
+  export ENABLE_SECONDARY_SOURCES="true"
+  echo "[startup] FINCENTRE unattended autopost forced on; Telegram + RSS sources enabled"
+fi
 
 echo "[startup] profile=${PROFILE} node_env=${NODE_ENV}"
 
@@ -107,6 +133,8 @@ if prepare_runtime_sources; then
     run_patch scripts/patch-pankoff-autotest-transport.mjs
     run_patch scripts/patch-autopost-throughput-v1.mjs
     run_patch scripts/patch-shared-media-pipeline-v1.mjs
+    # Editorial hard block: no Russia/RF-related news may enter the queue or public body.
+    run_patch scripts/patch-pankoff-block-russia-v1.mjs
   else
     # FINCENTRE BUSINESS anti-stall, source recovery, schedule self-heal and style.
     run_patch scripts/patch-fincentre-stall-v2.mjs
@@ -124,6 +152,8 @@ if prepare_runtime_sources; then
     run_patch scripts/patch-fincentre-publisher-v2.mjs
     run_patch scripts/patch-autopost-throughput-v1.mjs
     run_patch scripts/patch-shared-media-pipeline-v1.mjs
+    # Final unattended recovery: official RSS + always-on source redundancy + diagnostics.
+    run_patch scripts/patch-fincentre-autopost-v4.mjs
   fi
 
   echo "[startup] rebuilding patched API and dashboard"
